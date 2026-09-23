@@ -1,39 +1,39 @@
 package com.proximity.app;
-import android.Manifest; import android.app.*; import android.bluetooth.*; import android.bluetooth.le.*; import android.content.*; import android.content.pm.PackageManager; import android.graphics.*; import android.os.*; import android.view.*; import java.util.*;
-public class MainActivity extends Activity {
- RadarView radar; BluetoothLeScanner scanner; final Map<String,D> ds=new LinkedHashMap<>();
- public void onCreate(Bundle b){super.onCreate(b);radar=new RadarView(this);setContentView(radar);if(Build.VERSION.SDK_INT>=31&&checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.BLUETOOTH_SCAN,Manifest.permission.BLUETOOTH_CONNECT},7);else scan();}
- public void onRequestPermissionsResult(int r,String[] p,int[] g){super.onRequestPermissionsResult(r,p,g);if(r==7)scan();}
- void scan(){BluetoothManager m=(BluetoothManager)getSystemService(BLUETOOTH_SERVICE);if(m==null||m.getAdapter()==null||!m.getAdapter().isEnabled()){radar.s="BLUETOOTH OFF";radar.invalidate();return;}scanner=m.getAdapter().getBluetoothLeScanner();if(scanner==null)return;try{scanner.startScan(null,new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),cb);radar.s="LIVE SCAN";}catch(SecurityException e){radar.s="PERMISSION NEEDED";}radar.invalidate();}
- final ScanCallback cb=new ScanCallback(){public void onScanResult(int t,ScanResult r){String id;try{id=r.getDevice().getAddress();}catch(Exception e){id="d"+r.hashCode();}String n=r.getScanRecord()==null?null:r.getScanRecord().getDeviceName();if(n==null||n.isEmpty())n="Nearby device";D d=ds.get(id);if(d==null){d=new D(id,n,r.getRssi());ds.put(id,d);}d.n=n;d.r=(int)(d.r*.65+r.getRssi()*.35);d.t=System.currentTimeMillis();if(ds.size()>40)ds.remove(ds.keySet().iterator().next());radar.invalidate();}};
- protected void onDestroy(){super.onDestroy();try{if(scanner!=null)scanner.stopScan(cb);}catch(Exception e){}}
- class D{String id,n;int r;long t;D(String i,String n,int r){id=i;this.n=n;this.r=r;t=System.currentTimeMillis();}double m(){return Math.pow(10.0,(-59-r)/22.0);}}
- class RadarView extends View{
-  Paint p=new Paint(3),tx=new Paint(3); String s="STARTING…"; final int bg=Color.rgb(7,17,15),card=Color.rgb(12,29,25),edge=Color.rgb(32,67,57),green=Color.rgb(101,230,180),muted=Color.rgb(153,180,171);
-  RadarView(Context c){super(c);setBackgroundColor(bg);}
-  void rr(Canvas c,float l,float t,float r,float b,float rad,int color){p.setStyle(Paint.Style.FILL);p.setColor(color);c.drawRoundRect(l,t,r,b,rad,rad,p);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(1.5f);p.setColor(edge);c.drawRoundRect(l,t,r,b,rad,rad,p);}
-  void label(Canvas c,String a,float x,float y,float size,int color,boolean bold){tx.setTextSize(size);tx.setColor(color);tx.setTypeface(bold?Typeface.DEFAULT_BOLD:Typeface.DEFAULT);c.drawText(a,x,y,tx);}
-  protected void onDraw(Canvas c){super.onDraw(c);float w=getWidth(),h=getHeight(),pad=24;
-   label(c,"PROXIMITY",pad,54,36,Color.WHITE,true); label(c,"Nearby signal radar",pad,80,15,muted,false);
-   rr(c,pad,98,w-pad,154,18,card); p.setStyle(Paint.Style.FILL);p.setColor(green);c.drawCircle(pad+25,126,7,p);label(c,s,pad+42,132,16,green,true);label(c,ds.size()+" signals",w-pad-105,132,15,Color.WHITE,false);
-
-   float radarTop=174, radarBottom=Math.min(h*.55f,780), cx=w/2, cy=(radarTop+radarBottom)/2, R=Math.min(w*.43f,(radarBottom-radarTop)*.43f);
-   p.setStyle(Paint.Style.FILL);p.setColor(Color.rgb(8,23,19));c.drawCircle(cx,cy,R+14,p);
-   p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(2);p.setColor(edge);for(int j=1;j<=4;j++)c.drawCircle(cx,cy,R*j/4,p);c.drawLine(cx-R,cy,cx+R,cy,p);c.drawLine(cx,cy-R,cx,cy+R,p);
-   label(c,"15 ft",cx+7,cy-R/4+18,13,muted,false);label(c,"30 ft",cx+7,cy-R/2+18,13,muted,false);label(c,"60 ft",cx+7,cy-R*3/4+18,13,muted,false);
-   p.setStyle(Paint.Style.FILL);p.setColor(green);c.drawCircle(cx,cy,13,p);label(c,"YOU",cx-16,cy+38,13,Color.WHITE,true);
-   long now=System.currentTimeMillis();ArrayList<D> l=new ArrayList<>();for(D d:ds.values())if(now-d.t<15000)l.add(d);l.sort((a,b)->Integer.compare(b.r,a.r));int k=0;
-   for(D d:l){float rr=(float)Math.min(R,Math.max(30,R*Math.min(18,d.m())/18));double a=k++*2.399963;float x=cx+(float)Math.cos(a)*rr,y=cy+(float)Math.sin(a)*rr;p.setColor(green);c.drawCircle(x,y,8,p);}
-
-   float sy=radarBottom+20, capH=118, bottomPad=24, available=h-sy-capH-bottomPad-18; float sigH=Math.max(230,available);
-   rr(c,pad,sy,w-pad,sy+sigH,22,card);label(c,"NEARBY SIGNALS",pad+20,sy+34,19,Color.WHITE,true);label(c,"Strongest first",w-pad-116,sy+34,13,muted,false);
-   float y=sy+70;int shown=0;for(D d:l){if(shown++>=5||y>sy+sigH-35)break;p.setStyle(Paint.Style.FILL);p.setColor(green);c.drawCircle(pad+28,y-5,6,p);label(c,d.n,pad+48,y,16,Color.WHITE,true);String dist=String.format(Locale.US,"~%.1f ft",d.m()*3.28084);label(c,d.r+" dBm",w-pad-165,y,14,muted,false);label(c,dist,w-pad-82,y,14,green,true);if(y+18<sy+sigH-12){p.setColor(edge);c.drawRect(pad+20,y+22,w-pad-20,y+23,p);}y+=48;}
-   if(l.isEmpty())label(c,"Searching for Bluetooth LE advertisements…",pad+20,sy+82,15,muted,false);
-
-   float cy2=sy+sigH+18;rr(c,pad,cy2,w-pad,Math.min(h-bottomPad,cy2+capH),22,card);label(c,"PHONE CAPABILITIES",pad+20,cy2+32,18,Color.WHITE,true);
-   PackageManager pm=getPackageManager();boolean ble=pm.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE),uwb=Build.VERSION.SDK_INT>=31&&pm.hasSystemFeature("android.hardware.uwb"),rtt=Build.VERSION.SDK_INT>=28&&pm.hasSystemFeature(PackageManager.FEATURE_WIFI_RTT);
-   label(c,"BLE  "+yn(ble),pad+20,cy2+62,14,ble?green:muted,true);label(c,"UWB  "+yn(uwb),pad+135,cy2+62,14,uwb?green:muted,true);label(c,"Wi-Fi RTT  "+yn(rtt),pad+245,cy2+62,14,rtt?green:muted,true);label(c,"Distance is estimated • dot angle is not direction",pad+20,cy2+91,12,muted,false);
+import android.Manifest;import android.app.*;import android.bluetooth.*;import android.bluetooth.le.*;import android.content.*;import android.content.pm.PackageManager;import android.graphics.*;import android.net.Uri;import android.os.*;import android.provider.Settings;import android.view.*;import android.widget.*;import java.util.*;
+public class MainActivity extends Activity{
+ static final ParcelUuid SERVICE=new ParcelUuid(UUID.fromString("7f0a1001-7b4d-4e4d-9d7a-50524f58494d"));
+ Home v;BluetoothAdapter bt;BluetoothLeScanner scanner;BluetoothLeAdvertiser adv;boolean pairing=false,alarm=true;int boundary=15,rssi=-100;long seen=0;String partner="Partner";Uri photo;ToneGenerator tone;android.content.SharedPreferences sp;
+ public void onCreate(Bundle b){super.onCreate(b);sp=getSharedPreferences("p",0);partner=sp.getString("name","Partner");boundary=sp.getInt("boundary",15);alarm=sp.getBoolean("alarm",true);String u=sp.getString("photo","");if(!u.isEmpty())photo=Uri.parse(u);v=new Home(this);setContentView(v);BluetoothManager m=(BluetoothManager)getSystemService(BLUETOOTH_SERVICE);bt=m==null?null:m.getAdapter();ask();}
+ void ask(){if(Build.VERSION.SDK_INT>=31&&checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.BLUETOOTH_SCAN,Manifest.permission.BLUETOOTH_CONNECT,Manifest.permission.BLUETOOTH_ADVERTISE},8);}
+ public void onRequestPermissionsResult(int r,String[]p,int[]g){super.onRequestPermissionsResult(r,p,g);v.invalidate();}
+ void startPair(){if(bt==null||!bt.isEnabled()){Toast.makeText(this,"Turn Bluetooth on first",Toast.LENGTH_SHORT).show();return;}pairing=true;try{adv=bt.getBluetoothLeAdvertiser();if(adv!=null)adv.startAdvertising(new AdvertiseSettings.Builder().setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY).setConnectable(false).build(),new AdvertiseData.Builder().addServiceUuid(SERVICE).setIncludeDeviceName(false).build(),ac);scanner=bt.getBluetoothLeScanner();scanner.startScan(Collections.singletonList(new ScanFilter.Builder().setServiceUuid(SERVICE).build()),new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),sc);}catch(Exception e){Toast.makeText(this,"Bluetooth permission unavailable",Toast.LENGTH_SHORT).show();}v.invalidate();}
+ final AdvertiseCallback ac=new AdvertiseCallback(){};
+ final ScanCallback sc=new ScanCallback(){public void onScanResult(int t,ScanResult x){rssi=(int)(rssi*.6+x.getRssi()*.4);seen=System.currentTimeMillis();if(pairing){pairing=false;save();Toast.makeText(MainActivity.this,"Proximity partner found ♥",Toast.LENGTH_LONG).show();}checkAlarm();v.invalidate();}};
+ void checkAlarm(){if(!alarm||seen==0)return;double ft=feet();if(ft>boundary){try{if(tone==null)tone=new ToneGenerator(android.media.AudioManager.STREAM_ALARM,70);tone.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD,500);}catch(Exception e){}}}
+ double feet(){return Math.pow(10.0,(-59-rssi)/22.0)*3.28084;}
+ void save(){sp.edit().putString("name",partner).putInt("boundary",boundary).putBoolean("alarm",alarm).apply();}
+ void name(){final EditText e=new EditText(this);e.setText(partner.equals("Partner")?"":partner);e.setHint("Partner's name");new AlertDialog.Builder(this).setTitle("Add your person ♥").setView(e).setPositiveButton("Save",(d,w)->{String n=e.getText().toString().trim();if(!n.isEmpty())partner=n;save();v.invalidate();}).setNegativeButton("Cancel",null).show();}
+ void choosePhoto(){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("image/*");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,22);}
+ protected void onActivityResult(int r,int c,Intent d){super.onActivityResult(r,c,d);if(r==22&&c==RESULT_OK&&d!=null){photo=d.getData();try{getContentResolver().takePersistableUriPermission(photo,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception e){}sp.edit().putString("photo",photo.toString()).apply();v.invalidate();}}
+ protected void onDestroy(){super.onDestroy();try{if(scanner!=null)scanner.stopScan(sc);if(adv!=null)adv.stopAdvertising(ac);}catch(Exception e){}if(tone!=null)tone.release();}
+ class Home extends View{
+  Paint p=new Paint(3),t=new Paint(3);int blue=Color.rgb(55,132,255),purple=Color.rgb(177,91,255),bg=Color.rgb(8,9,24),card=Color.rgb(18,19,43),muted=Color.rgb(167,169,195);RectF add=new RectF(),pair=new RectF(),dist=new RectF(),alarmR=new RectF(),photoR=new RectF();
+  Home(Context c){super(c);setBackgroundColor(bg);}
+  void txt(Canvas c,String s,float x,float y,float z,int col,boolean b){t.setTextSize(z);t.setColor(col);t.setTypeface(b?Typeface.DEFAULT_BOLD:Typeface.DEFAULT);c.drawText(s,x,y,t);}
+  void box(Canvas c,RectF r,float rad){p.setStyle(Paint.Style.FILL);p.setColor(card);c.drawRoundRect(r,rad,rad,p);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(2);p.setColor(Color.rgb(48,48,84));c.drawRoundRect(r,rad,rad,p);}
+  void button(Canvas c,RectF r,String s,int col){p.setStyle(Paint.Style.FILL);p.setColor(col);c.drawRoundRect(r,22,22,p);t.setTextAlign(Paint.Align.CENTER);txt(c,s,r.centerX(),r.centerY()+7,18,Color.WHITE,true);t.setTextAlign(Paint.Align.LEFT);}
+  protected void onDraw(Canvas c){super.onDraw(c);float w=getWidth(),h=getHeight(),pad=24;txt(c,"PROXIMITY",pad,54,34,Color.WHITE,true);txt(c,"Closer, together.",pad,80,16,purple,false);p.setShader(new LinearGradient(pad,94,w-pad,94,blue,purple,Shader.TileMode.CLAMP));p.setStyle(Paint.Style.FILL);c.drawRoundRect(pad,94,w-pad,100,3,3,p);p.setShader(null);
+   RectF profile=new RectF(pad,122,w-pad,255);box(c,profile,24);float px=pad+66,py=188;p.setColor(Color.rgb(37,39,72));p.setStyle(Paint.Style.FILL);c.drawCircle(px,py,45,p);Bitmap bm=null;if(photo!=null)try{bm=BitmapFactory.decodeStream(getContentResolver().openInputStream(photo));}catch(Exception e){}if(bm!=null){Path q=new Path();q.addCircle(px,py,43,Path.Direction.CW);c.save();c.clipPath(q);c.drawBitmap(bm,null,new RectF(px-43,py-43,px+43,py+43),p);c.restore();}else{txt(c,"♥",px-17,py+15,42,purple,true);}
+   photoR.set(px-48,py-48,px+48,py+48);txt(c,partner,pad+130,174,24,Color.WHITE,true);String state=seen>0&&System.currentTimeMillis()-seen<12000?"Connected • "+String.format(Locale.US,"~%.1f ft",feet()):pairing?"Looking for your person…":"Not connected";txt(c,state,pad+130,204,15,state.startsWith("Connected")?blue:muted,false);txt(c,"Tap photo to choose image",pad+130,231,13,muted,false);
+   add.set(w-pad-118,139,w-pad-18,183);button(c,add,"EDIT",Color.rgb(64,65,105));
+   float top=282,cx=w/2,cy=top+Math.min(w*.42f,190),R=Math.min(w*.40f,185);txt(c,"YOUR BOND",pad,top,18,Color.WHITE,true);txt(c,"Live proximity",w-pad-115,top,13,muted,false);
+   p.setStyle(Paint.Style.FILL);p.setColor(Color.rgb(12,14,35));c.drawCircle(cx,cy,R+10,p);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(2);for(int j=1;j<=4;j++){p.setColor(j%2==0?Color.rgb(63,58,112):Color.rgb(42,51,91));c.drawCircle(cx,cy,R*j/4,p);}c.drawLine(cx-R,cy,cx+R,cy,p);c.drawLine(cx,cy-R,cx,cy+R,p);
+   p.setStyle(Paint.Style.FILL);p.setColor(blue);c.drawCircle(cx,cy,12,p);txt(c,"YOU",cx-16,cy+35,13,Color.WHITE,true);
+   if(seen>0&&System.currentTimeMillis()-seen<12000){float rr=(float)Math.min(R,Math.max(40,R*Math.min(boundary*1.6,feet())/(boundary*1.6)));double a=-.72;float x=cx+(float)Math.cos(a)*rr,y=cy+(float)Math.sin(a)*rr;p.setColor(purple);c.drawCircle(x,y,23,p);if(bm!=null){Path q=new Path();q.addCircle(x,y,20,Path.Direction.CW);c.save();c.clipPath(q);c.drawBitmap(bm,null,new RectF(x-20,y-20,x+20,y+20),p);c.restore();}txt(c,partner,x-25,y+43,12,Color.WHITE,true);}
+   txt(c,"Range is estimated • angle is decorative (BLE has no bearing)",pad,cy+R+30,12,muted,false);
+   float y=cy+R+55;RectF controls=new RectF(pad,y,w-pad,y+142);box(c,controls,24);txt(c,"BOUNDARY",pad+20,y+31,13,muted,true);txt(c,boundary+" ft",pad+20,y+62,25,Color.WHITE,true);dist.set(pad+16,y+12,pad+150,y+78);txt(c,"ALARM",w/2+15,y+31,13,muted,true);txt(c,alarm?"ON ♥":"OFF",w/2+15,y+62,23,alarm?purple:muted,true);alarmR.set(w/2,y+10,w-pad,y+80);pair.set(pad+18,y+88,w-pad-18,y+132);button(c,pair,pairing?"PAIRING…":"PAIR WITH PARTNER",new Color().rgb(91,74,210));
+   float info=y+165;txt(c,"How tonight's test works",pad,info,17,Color.WHITE,true);txt(c,"Install this build on both phones, open Proximity, then",pad,info+27,14,muted,false);txt(c,"tap PAIR WITH PARTNER on both. Keep both apps open.",pad,info+48,14,muted,false);
   }
-  String yn(boolean b){return b?"YES":"NO";}
+  public boolean onTouchEvent(android.view.MotionEvent e){if(e.getAction()!=MotionEvent.ACTION_UP)return true;float x=e.getX(),y=e.getY();if(add.contains(x,y)){name();return true;}if(photoR.contains(x,y)){choosePhoto();return true;}if(pair.contains(x,y)){startPair();return true;}if(dist.contains(x,y)){boundary=boundary==15?30:boundary==30?50:15;save();invalidate();return true;}if(alarmR.contains(x,y)){alarm=!alarm;save();invalidate();return true;}return true;}
  }
 }
