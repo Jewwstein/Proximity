@@ -1,8 +1,9 @@
-name: Build Proximity APK
+name: Build Soul Slime APK
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "soulslime-build" ]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -11,10 +12,21 @@ jobs:
       ANDROID_SDK_ROOT: /home/runner/android-sdk
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: soulslime-build
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Restore verified Soul Slime source
+        run: |
+          base64 -d .soulslime_payload/project.b64 > /tmp/SoulSlimeNative-build.zip
+          echo "9e76cb5a66667f90321d37218777ceef03f81756069cab37f2348c88391e46b9  /tmp/SoulSlimeNative-build.zip" | sha256sum -c -
+          mkdir -p /tmp/soulslime
+          unzip -q /tmp/SoulSlimeNative-build.zip -d /tmp/soulslime
+
       - name: Install Android command-line tools
         run: |
           mkdir -p "$ANDROID_HOME/cmdline-tools"
@@ -23,16 +35,29 @@ jobs:
           mv /tmp/android-tools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+
       - name: Install Android SDK 35
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+
       - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+        run: gradle -p /tmp/soulslime/SoulSlimeNative :app:assembleDebug --stacktrace
+
+      - name: Prepare deliverables
+        run: |
+          cp /tmp/soulslime/SoulSlimeNative/app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/SoulSlime-v11-Mite-Voidweaver-debug.apk"
+          cp /tmp/SoulSlimeNative-build.zip "$GITHUB_WORKSPACE/SoulSlime-v11-source.zip"
+          sha256sum SoulSlime-v11-Mite-Voidweaver-debug.apk SoulSlime-v11-source.zip > SHA256SUMS.txt
+
       - uses: actions/upload-artifact@v4
         with:
-          name: Proximity-v0.1-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: SoulSlime-v11-Mite-Voidweaver
+          path: |
+            SoulSlime-v11-Mite-Voidweaver-debug.apk
+            SoulSlime-v11-source.zip
+            SHA256SUMS.txt
