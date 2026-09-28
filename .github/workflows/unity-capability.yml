@@ -1,0 +1,21 @@
+name: Unity CI capability check
+on:
+  push:
+    branches: [ "soulslime-build" ]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Unity CI secrets
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        run: |
+          test -n "$UNITY_LICENSE" && echo "UNITY_LICENSE_PRESENT=yes" || echo "UNITY_LICENSE_PRESENT=no"
+          test -n "$UNITY_EMAIL" && echo "UNITY_EMAIL_PRESENT=yes" || echo "UNITY_EMAIL_PRESENT=no"
+          test -n "$UNITY_PASSWORD" && echo "UNITY_PASSWORD_PRESENT=yes" || echo "UNITY_PASSWORD_PRESENT=no"
+          test -n "$UNITY_SERIAL" && echo "UNITY_SERIAL_PRESENT=yes" || echo "UNITY_SERIAL_PRESENT=no"
