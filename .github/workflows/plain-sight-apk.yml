@@ -2,6 +2,12 @@ name: Plain Sight Android APK
 on:
   push:
     branches: [plain-sight-android]
+    paths:
+      - 'app/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle.properties'
+      - '.github/workflows/plain-sight-apk.yml'
   workflow_dispatch:
 permissions:
   contents: write
