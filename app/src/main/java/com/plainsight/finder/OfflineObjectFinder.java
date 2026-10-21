@@ -139,6 +139,10 @@ public final class OfflineObjectFinder implements AutoCloseable {
      * Heavy scans run only during acquisition, never during optical-flow tracking.
      */
     public List<Match> findAcross(Bitmap source,String requested,int maxCandidates) throws Exception {
+        return findAcross(source,requested,maxCandidates,false);
+    }
+    public List<Match> findAcross(Bitmap source,String requested,int maxCandidates,
+                                  boolean exhaustive) throws Exception {
         List<Integer> wanted=candidateLabels(requested);
         if(wanted.isEmpty())return Collections.emptyList();
         int w=source.getWidth(),h=source.getHeight();
@@ -146,7 +150,7 @@ public final class OfflineObjectFinder implements AutoCloseable {
         Match broad=detect(source,requested,wanted,new Rect(0,0,w,h));
         if(broad!=null)pool.add(broad);
         // Still scan tiles after an uncertain full-frame match.
-        if(broad!=null && broad.score>=.49f) return pool;
+        if(!exhaustive && broad!=null && broad.score>=.49f) return pool;
         int tileW=Math.max(60,Math.round(w*.63f));
         int tileH=Math.max(60,Math.round(h*.44f));
         for(int row=0;row<3;row++){
@@ -171,7 +175,7 @@ public final class OfflineObjectFinder implements AutoCloseable {
                     }
                 }
                 if(!duplicate)pool.add(candidate);
-                if(pool.size()>=maxCandidates && pool.stream().anyMatch(c->c.score>.44f))break;
+                if(!exhaustive && pool.size()>=maxCandidates && pool.stream().anyMatch(c->c.score>.44f))break;
             }
         }
         pool.sort((a,b)->Float.compare(b.score,a.score));
