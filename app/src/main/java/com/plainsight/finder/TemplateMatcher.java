@@ -9,6 +9,7 @@ import org.json.JSONArray;
 import org.opencv.android.Utils;
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
+import org.opencv.core.MatOfDouble;
 import org.opencv.core.Rect;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
@@ -49,7 +50,7 @@ public final class TemplateMatcher {
                     Mat patch=new Mat(photo,new Rect(borderX,borderY,
                         photo.cols()-2*borderX,photo.rows()-2*borderY));
                     try {
-                        Mat mean=new Mat(),std=new Mat();
+                        MatOfDouble mean=new MatOfDouble(),std=new MatOfDouble();
                         Core.meanStdDev(patch,mean,std);
                         double variation=std.get(0,0)[0];
                         mean.release();std.release();
