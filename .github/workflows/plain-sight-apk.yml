@@ -28,8 +28,10 @@ jobs:
           name: PlainSight-Test-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+      - name: Name final test APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/PlainSight-v0.2.0.apk
       - name: Publish test APK as prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create plain-sight-v0.1.0 app/build/outputs/apk/debug/app-debug.apk --target "$GITHUB_SHA" --title "Plain Sight v0.1.0 test APK" --notes "Standalone Android visual object finder test build. First search downloads a quantized open-vocabulary detector (~160 MB). Requires Chrome WebView internet access. Not yet device-validated." --prerelease || gh release upload plain-sight-v0.1.0 app/build/outputs/apk/debug/app-debug.apk --clobber
+          gh release create plain-sight-v0.2.0 app/build/outputs/apk/debug/PlainSight-v0.2.0.apk --target "$GITHUB_SHA" --title "Plain Sight v0.2.0 · personal object learning" --notes "Standalone Android visual object finder test build. First search downloads a quantized open-vocabulary detector (~160 MB). Requires Chrome WebView internet access. Not yet device-validated." --prerelease || gh release upload plain-sight-v0.2.0 app/build/outputs/apk/debug/PlainSight-v0.2.0.apk --clobber

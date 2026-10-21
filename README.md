@@ -2,6 +2,12 @@
 
 Open the app. Point its camera at a scene. Speak or type **Find my keys**. It analyzes the current camera frame using on-device open-vocabulary image detection and highlights the strongest visible match, then digitally zooms into the captured region.
 
+## Teach personal objects (v0.2 experimental)
+
+Tap **+** on the camera screen, name an item, and hold it centered while slowly rotating for eight automatic photos. The app saves compact on-device image-feature vectors (not a real geometric 3D model). Ask for the saved name to search the scene by sliding-window image similarity. Normal unsaved-name searches still use universal text-guided detection.
+
+Visual comparisons are approximate, not identity proof. Small reflective keys and partially hidden objects can be difficult. The first personal search downloads a small MediaPipe vision model. Personal data is kept in local app storage, and users can delete saved items in the same panel.
+
 ## Test
 1. Install the APK from the latest **Plain Sight** prerelease or workflow artifact.
 2. Allow camera access and provide internet access on first launch.
