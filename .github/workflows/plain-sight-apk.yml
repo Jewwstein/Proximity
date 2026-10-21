@@ -35,12 +35,12 @@ jobs:
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: PlainSight-Offline-v0.5.1
+          name: PlainSight-Offline-v0.5.2
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
       - name: Publish test APK
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk PlainSight-v0.5.1.apk
-          gh release create plain-sight-v0.5.1 PlainSight-v0.5.1.apk --target "$GITHUB_SHA" --title "Plain Sight v0.5.1 — Offline visual search" --notes "Real open-vocabulary object grounding with Gemini 3.8 Flash API, saved reference photos, and bounding-box highlights. Requires user's own Gemini API key entered in app. Camera images sent to Google's Gemini API. Not device-validated; experimental." --prerelease || gh release upload plain-sight-v0.5.1 PlainSight-v0.5.1.apk --clobber
+          cp app/build/outputs/apk/debug/app-debug.apk PlainSight-v0.5.2.apk
+          gh release create plain-sight-v0.5.2 PlainSight-v0.5.2.apk --target "$GITHUB_SHA" --title "Plain Sight v0.5.2 — Offline visual search" --notes "On-device YOLOE model for 62 object categories, plus bundled offline text recognition. No Gemini image uploads or API key. Experimental and not yet tested on the target phone." --prerelease || gh release upload plain-sight-v0.5.2 PlainSight-v0.5.2.apk --clobber
