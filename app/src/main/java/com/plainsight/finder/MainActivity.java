@@ -54,7 +54,7 @@ public final class MainActivity extends ComponentActivity {
     private static final int CYAN=0xff83eaff,INK=0xff081323,WHITE=0xffefffff;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final Handler ui=new Handler(Looper.getMainLooper());
-    private FrameLayout root;
+    private FrameLayout root,cameraLayer;
     private PreviewView preview;
     private Overlay overlay;
     private LinearLayout bottom,teachPanel,keyPanel,savedList;
@@ -74,6 +74,8 @@ public final class MainActivity extends ComponentActivity {
     private MotionTracker motionTracker;
     private int followSerial=0;
     private boolean followActive=false;
+    private RectF followRegion;
+    private Bitmap lastGoodFrame;
     private int misses=0;
 
     private int dp(float n){return Math.round(n*getResources().getDisplayMetrics().density);}
@@ -122,12 +124,19 @@ public final class MainActivity extends ComponentActivity {
     }
     private void constructUi(){
         root=new FrameLayout(this);root.setBackgroundColor(INK);setContentView(root);
+        cameraLayer=new FrameLayout(this);
+        cameraLayer.setPivotX(0f);cameraLayer.setPivotY(0f);
+        root.addView(cameraLayer,new FrameLayout.LayoutParams(-1,-1));
         preview=new PreviewView(this);
         preview.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
         preview.setScaleType(PreviewView.ScaleType.FILL_CENTER);
-        root.addView(preview,new FrameLayout.LayoutParams(-1,-1));
+        cameraLayer.addView(preview,new FrameLayout.LayoutParams(-1,-1));
         overlay=new Overlay();
-        root.addView(overlay,new FrameLayout.LayoutParams(-1,-1));
+        cameraLayer.addView(overlay,new FrameLayout.LayoutParams(-1,-1));
+        cameraLayer.setClickable(false);
+        cameraLayer.setOnClickListener(v->{
+            if(followActive)freezeTracking("Paused at the selected target");
+        });
         focusLock=new FocusLockView(this);
         root.addView(focusLock,new FrameLayout.LayoutParams(-1,-1));
         focusLock.setOnClickListener(v->{
@@ -380,8 +389,10 @@ public final class MainActivity extends ComponentActivity {
         v.clearFocus();
     }
     private void reset(){
-        followSerial++;followActive=false;
-        token++;searching=false;overlay.clear();if(focusLock!=null)focusLock.clear();if(zoom!=null)zoom.setVisibility(View.GONE);
+        followSerial++;followActive=false;followRegion=null;
+        token++;searching=false;overlay.clear();
+        restoreCameraView();releaseLastFrame();
+        if(focusLock!=null)focusLock.clear();if(zoom!=null)zoom.setVisibility(View.GONE);
         if(searchButton!=null){searchButton.setText("FIND");searchButton.setEnabled(true);}
     }
     private String normalize(String s){
@@ -457,68 +468,126 @@ public final class MainActivity extends ComponentActivity {
     }
     private Bitmap smallForTracking(Bitmap full) {
         int longest=Math.max(full.getWidth(),full.getHeight());
-        if(longest<=980)return full.copy(Bitmap.Config.ARGB_8888,false);
-        float scale=980f/longest;
+        if(longest<=560)return full.copy(Bitmap.Config.ARGB_8888,false);
+        float scale=560f/longest;
         return Bitmap.createScaledBitmap(full,Math.max(1,Math.round(full.getWidth()*scale)),
             Math.max(1,Math.round(full.getHeight()*scale)),true);
     }
-    private void holdMatch(Bitmap snap,RectF bounds,String message) {
-        if(focusLock==null||bounds==null||snap==null){if(snap!=null)snap.recycle();return;}
-        searching=false;
-        focusLock.hold(snap,bounds);
+    private void cameraZoom(RectF selection,boolean first){
+        if(cameraLayer==null || selection==null)return;
+        final float w=cameraLayer.getWidth(),h=cameraLayer.getHeight();
+        if(w<10||h<10)return;
+        // Scale the REAL live preview and its overlay together on the GPU.
+        // No new full-screen bitmap needs to be drawn for each tracked frame.
+        float amount=Math.min(3.4f,Math.max(1.12f,
+            Math.min(1f/(Math.max(.025f,selection.width())*2.25f),
+                     1f/(Math.max(.025f,selection.height())*2.25f))));
+        float dx=w*.5f-(selection.centerX()*w)*amount;
+        float dy=h*.5f-(selection.centerY()*h)*amount;
+        cameraLayer.animate().scaleX(amount).scaleY(amount)
+            .translationX(dx).translationY(dy)
+            .setDuration(first?230:115)
+            .setInterpolator(new android.view.animation.DecelerateInterpolator())
+            .start();
+    }
+    private void restoreCameraView(){
+        if(cameraLayer==null)return;
+        cameraLayer.animate().cancel();
+        cameraLayer.setScaleX(1f);cameraLayer.setScaleY(1f);
+        cameraLayer.setTranslationX(0);cameraLayer.setTranslationY(0);
+        cameraLayer.setClickable(false);
+    }
+    private void releaseLastFrame(){
+        if(lastGoodFrame!=null&&!lastGoodFrame.isRecycled())lastGoodFrame.recycle();
+        lastGoodFrame=null;
+    }
+    private void freezeTracking(String reason){
+        followSerial++;followActive=false;
+        Bitmap still=lastGoodFrame;
+        RectF region=followRegion;
+        lastGoodFrame=null;
+        restoreCameraView();
         overlay.clear();
-        searchButton.setEnabled(true);
-        searchButton.setText("FIND");
-        state(message+" · digitally zoomed; tracking movement");
-        followSerial++;
-        final int session=followSerial;
-        if(motionTracker==null){
-            state(message+" · zoomed snapshot (tracking engine unavailable)");
-            return;
+        if(still!=null && region!=null && focusLock!=null){
+            focusLock.hold(still,region);
+            focusLock.toggleFreeze();
+            state(reason+" · tap zoomed image to resume scanning");
+        }else{
+            if(still!=null&&!still.isRecycled())still.recycle();
+            state("Tracking lost · tap FIND to search again");
         }
-        followActive=true;
-        final Bitmap scaled=smallForTracking(snap);
+    }
+    private void holdMatch(Bitmap snap,RectF bounds,String message){
+        if(snap==null||bounds==null){if(snap!=null)snap.recycle();return;}
+        searching=false;
+        followSerial++;final int session=followSerial;
+        followActive=false;releaseLastFrame();
+        followRegion=new RectF(bounds);
+        lastGoodFrame=snap;
+        if(focusLock!=null)focusLock.clear();
+        overlay.show(bounds.left,bounds.top,bounds.right,bounds.bottom);
+        cameraLayer.setClickable(true);
+        cameraZoom(bounds,true);
+        searchButton.setText("FIND");searchButton.setEnabled(true);
+        state(message+" · live zoom tracking · tap camera to pause");
+        if(motionTracker==null){freezeTracking("Tracking engine unavailable");return;}
+        final Bitmap init=smallForTracking(snap);
         worker.execute(()->{
-            boolean initialized=false;
-            try {initialized=motionTracker.begin(scaled,bounds);}
-            catch(Throwable e){android.util.Log.e("PlainSight","Tracking initialization failed",e);}
-            finally {scaled.recycle();}
-            final boolean canFollow=initialized;
+            boolean started=false;
+            try{started=motionTracker.begin(init,bounds);}
+            catch(Throwable e){android.util.Log.w("PlainSight","Tracking start failed",e);}
+            finally{init.recycle();}
+            final boolean ready=started;
             ui.post(()->{
-                if(session!=followSerial||!focusLock.isHeld())return;
-                if(canFollow)ui.postDelayed(()->followSelection(session),90);
-                else{followActive=false;state(message+" · zoomed snapshot; not enough detail for tracking");}
+                if(session!=followSerial || lastGoodFrame==null)return;
+                if(ready){
+                    followActive=true;
+                    ui.postDelayed(()->followSelection(session),65);
+                }else freezeTracking("Not enough visual detail to track reliably");
             });
         });
     }
     private void followSelection(int session){
-        if(!followActive||session!=followSerial||focusLock==null||focusLock.isFrozen())return;
-        Bitmap screen=frame();
-        if(screen==null||screen.getWidth()<40){
-            ui.postDelayed(()->followSelection(session),180);
-            return;
+        if(!followActive||session!=followSerial)return;
+        Bitmap captured=frame();
+        if(captured==null||captured.getWidth()<50){
+            ui.postDelayed(()->followSelection(session),100);return;
         }
-        Bitmap sampled=smallForTracking(screen);
-        screen.recycle();
+        Bitmap small=smallForTracking(captured);
         worker.execute(()->{
-            RectF updated=null;
-            try{updated=motionTracker.advance(sampled);}
-            catch(Throwable e){android.util.Log.w("PlainSight","Optical tracking failed",e);}
-            final RectF region=updated;
+            RectF found=null;
+            try{found=motionTracker.advance(small);}
+            catch(Throwable e){android.util.Log.w("PlainSight","Tracking update failed",e);}
+            finally{small.recycle();}
+            final RectF next=found;
             ui.post(()->{
-                if(!followActive||session!=followSerial||focusLock.isFrozen()){
-                    sampled.recycle();return;
+                if(!followActive||session!=followSerial){
+                    captured.recycle();return;
                 }
-                if(region==null){
-                    sampled.recycle();followActive=false;
-                    state("Tracking lost. Zoom paused on the last frame; tap FIND to find it again.");
+                if(next==null){
+                    captured.recycle();
+                    freezeTracking("Tracking lost · last verified frame");
                     return;
                 }
-                focusLock.follow(sampled,region);
-                ui.postDelayed(()->followSelection(session),145);
+                // Dampen pixel jitter before moving the camera and marker.
+                if(followRegion!=null){
+                    float alpha=.42f;
+                    followRegion=new RectF(
+                        followRegion.left*(1-alpha)+next.left*alpha,
+                        followRegion.top*(1-alpha)+next.top*alpha,
+                        followRegion.right*(1-alpha)+next.right*alpha,
+                        followRegion.bottom*(1-alpha)+next.bottom*alpha);
+                }else followRegion=new RectF(next);
+                releaseLastFrame();
+                lastGoodFrame=captured;
+                overlay.show(followRegion.left,followRegion.top,
+                    followRegion.right,followRegion.bottom);
+                cameraZoom(followRegion,false);
+                ui.postDelayed(()->followSelection(session),55);
             });
         });
     }
+
     private void scanText(int job,String value){
         if(!searching||job!=token)return;
         Bitmap current=frame();
