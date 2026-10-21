@@ -5,6 +5,10 @@ import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
+import android.graphics.Color;
 import android.graphics.RectF;
 import org.json.JSONArray;
 import java.io.File;
@@ -78,7 +82,7 @@ public final class OfflineObjectFinder implements AutoCloseable {
     private Match parse(float[][][] arr,List<Integer> wanted,String requested) {
         if(arr==null||arr.length==0)return null;
         float[][] data=arr[0];if(data.length==0)return null;
-        float max=requested.toLowerCase(Locale.ROOT).contains("straw")?.065f:.16f;Match best=null;
+        float max=(requested.toLowerCase(Locale.ROOT).contains("straw") || requested.toLowerCase(Locale.ROOT).contains("key"))?.045f:.14f;Match best=null;
         // YOLO26 NMS-free format [1,300,38]: [x1,y1,x2,y2,score,class] + mask info.
         if(data[0].length>=6&&data[0].length<=64&&data.length>=10){
             for(float[] row:data){
@@ -116,25 +120,53 @@ public final class OfflineObjectFinder implements AutoCloseable {
     public Match find(Bitmap src,String query) throws Exception {
         List<Integer> wanted=candidateLabels(query);
         if(wanted.isEmpty())return null;
-        Bitmap img=Bitmap.createScaledBitmap(src,SIZE,SIZE,true);
-        int[] argb=new int[SIZE*SIZE];img.getPixels(argb,0,SIZE,0,0,SIZE,SIZE);
-        if(img!=src)img.recycle();
-        // Float tensor in NCHW channel order. This is isolated off the main/UI thread.
-        FloatBuffer b=ByteBuffer.allocateDirect(3*SIZE*SIZE*4)
+        // Ultralytics models expect letterboxed 320x320 images, not distorted
+        // portrait previews stretched into a square (previous implementation).
+        Match full=detect(src,query,wanted,new Rect(0,0,src.getWidth(),src.getHeight()));
+        if(full!=null)return full;
+        // A centered detail pass gives thin or small objects more usable pixels.
+        int w=src.getWidth(),h=src.getHeight();
+        int cropWidth=Math.round(w*.62f),cropHeight=Math.round(h*.62f);
+        return detect(src,query,wanted,new Rect((w-cropWidth)/2,(h-cropHeight)/2,
+            (w+cropWidth)/2,(h+cropHeight)/2));
+    }
+    private Match detect(Bitmap src,String query,List<Integer> wanted,Rect crop) throws Exception {
+        Bitmap input=Bitmap.createBitmap(SIZE,SIZE,Bitmap.Config.ARGB_8888);
+        Canvas canvas=new Canvas(input);
+        canvas.drawColor(Color.rgb(114,114,114));
+        final int width=crop.width(),height=crop.height();
+        final float scale=Math.min(SIZE/(float)width,SIZE/(float)height);
+        final float padx=(SIZE-width*scale)/2,pady=(SIZE-height*scale)/2;
+        canvas.drawBitmap(src,crop,new RectF(padx,pady,padx+width*scale,pady+height*scale),
+            new Paint(Paint.FILTER_BITMAP_FLAG));
+        int[] pixels=new int[SIZE*SIZE];
+        input.getPixels(pixels,0,SIZE,0,0,SIZE,SIZE);
+        input.recycle();
+        FloatBuffer buf=ByteBuffer.allocateDirect(3*SIZE*SIZE*4)
             .order(ByteOrder.nativeOrder()).asFloatBuffer();
-        for(int channel=0;channel<3;channel++){
-            int shift=channel==0?16:channel==1?8:0;
-            for(int pixel:argb)b.put(((pixel>>shift)&255)/255f);
+        for(int c=0;c<3;c++){
+            int shift=c==0?16:c==1?8:0;
+            for(int pixel:pixels)buf.put(((pixel>>shift)&255)/255f);
         }
-        b.rewind();
-        long start=android.os.SystemClock.elapsedRealtime();
-        try(OnnxTensor input=OnnxTensor.createTensor(env,b,new long[]{1,3,SIZE,SIZE});
-            OrtSession.Result result=session.run(Collections.singletonMap(inputName,input))){
-            Object out=result.get(0).getValue();
-            if(!(out instanceof float[][][]))throw new IllegalStateException("Unexpected detector output tensor");
-            Match best=parse((float[][][])out,wanted,query);
-            android.util.Log.i("PlainSight","YOLOE inference "+(android.os.SystemClock.elapsedRealtime()-start)+"ms target="+query+" found="+(best!=null));
-            return best;
+        buf.rewind();
+        final long started=android.os.SystemClock.elapsedRealtime();
+        try(OnnxTensor image=OnnxTensor.createTensor(env,buf,new long[]{1,3,SIZE,SIZE});
+            OrtSession.Result results=session.run(Collections.singletonMap(inputName,image))){
+            Object output=results.get(0).getValue();
+            if(!(output instanceof float[][][]))throw new IllegalStateException("Unexpected visual detector tensor");
+            Match candidate=parse((float[][][])output,wanted,query);
+            if(candidate==null)return null;
+            // Undo padding and map from this pass back to original full frame.
+            float l=(candidate.bounds.left*SIZE-padx)/scale+crop.left;
+            float t=(candidate.bounds.top*SIZE-pady)/scale+crop.top;
+            float r=(candidate.bounds.right*SIZE-padx)/scale+crop.left;
+            float b=(candidate.bounds.bottom*SIZE-pady)/scale+crop.top;
+            RectF translated=new RectF(clamp(l/src.getWidth()),clamp(t/src.getHeight()),
+                clamp(r/src.getWidth()),clamp(b/src.getHeight()));
+            if(translated.width()<=.002f||translated.height()<=.002f)return null;
+            android.util.Log.i("PlainSight","YOLOE "+query+" class="+candidate.label+" score="+
+                candidate.score+" latency="+(android.os.SystemClock.elapsedRealtime()-started)+"ms");
+            return new Match(translated,candidate.label,candidate.score);
         }
     }
     @Override public void close() throws Exception {session.close();}
