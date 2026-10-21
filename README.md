@@ -1,4 +1,4 @@
-# Plain Sight v0.4.0 — Real AI vision
+# Plain Sight v0.4.1 — Real AI vision
 
 This iteration **replaces** the old weak ML Kit whole-image classifier and MobileNet visual similarity matcher. They did not do arbitrary object detection, which is why the first versions failed the key-fob test.
 
@@ -13,7 +13,7 @@ This iteration **replaces** the old weak ML Kit whole-image classifier and Mobil
 - The app does NOT create a true 3D model or optical camera zoom.
 
 ## First run
-1. Install from the v0.4.0 prerelease; allow camera.
+1. Install from the v0.4.1 prerelease; allow camera.
 2. Tap **GET A GOOGLE AI STUDIO KEY** in the initial key screen, generate your own key, and paste it in the app. Don't post your key in chat, GitHub, or screenshots.
 3. To test universal mode, aim at your keys and speak "Find my keys" then keep the phone still for the request. On a return the app highlights a box or honestly says it couldn't identify the object.
 4. For personal mode, tap +, give your item the same name you'll search, and rotate for eight captured photos. Then FIND sends selected reference views alongside the camera image.

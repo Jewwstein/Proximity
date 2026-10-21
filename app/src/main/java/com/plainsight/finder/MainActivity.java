@@ -355,7 +355,7 @@ public final class MainActivity extends ComponentActivity {
         if(apiKey.isEmpty()){openKey();return;}
         closeLearn();reset();
         Bitmap scene=frame();
-        if(scene==null||scene.getWidth()<50){state("Camera not ready. Try again.");return;}
+        if(scene==null||scene.getWidth()<50){state("Camera frame not ready yet. Press FIND again after the preview appears.");return;}
         searching=true;searchButton.setEnabled(false);searchButton.setText("···");
         hideKeyboard(query);
         int request=token;
@@ -422,7 +422,7 @@ public final class MainActivity extends ComponentActivity {
         super.onActivityResult(request,result,data);
         if(request==REQ_VOICE&&result==Activity.RESULT_OK&&data!=null){
             ArrayList<String> words=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            if(words!=null&&!words.isEmpty()){query.setText(words.get(0));search();}
+            if(words!=null&&!words.isEmpty()){query.setText(words.get(0));ui.postDelayed(this::search,850);}
         }
     }
     @Override public void onBackPressed(){
