@@ -30,7 +30,7 @@ jobs:
           MKL_NUM_THREADS: '2'
         run: python benchmarks/yoloe_real_fob.py
       - name: Install OWLv2 model support
-        run: pip install 'transformers>=4.57,<5' safetensors
+        run: pip install 'transformers>=4.57,<5' safetensors scipy
       - name: Test OWLv2 image-guided detection with same fob and negatives
         env:
           OMP_NUM_THREADS: '2'
