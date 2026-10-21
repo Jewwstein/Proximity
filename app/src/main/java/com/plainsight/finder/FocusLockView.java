@@ -13,6 +13,7 @@ import android.view.View;
 public final class FocusLockView extends View {
     private Bitmap photo;
     private RectF bounds;
+    private boolean frozen=false;
     private final Paint imagePaint=new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
     private final Paint line=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint text=new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -29,13 +30,32 @@ public final class FocusLockView extends View {
         clear();
         photo=shot;
         bounds=new RectF(normalized);
+        frozen=false;
         setVisibility(VISIBLE);
         invalidate();
     }
     public boolean isHeld(){return photo!=null;}
+    public boolean isFrozen(){return frozen;}
+    public boolean toggleFreeze(){
+        if(photo==null)return false;
+        frozen=!frozen;
+        invalidate();
+        return frozen;
+    }
+    // Every live update owns a matching frame and rectangle.
+    public void follow(Bitmap shot,RectF normalized){
+        if(shot==null)return;
+        if(frozen){shot.recycle();return;}
+        Bitmap old=photo;
+        photo=shot;
+        bounds=new RectF(normalized);
+        setVisibility(VISIBLE);
+        invalidate();
+        if(old!=null && old!=shot && !old.isRecycled())old.recycle();
+    }
     public void clear(){
         Bitmap old=photo;
-        photo=null;bounds=null;
+        photo=null;bounds=null;frozen=false;
         setVisibility(GONE);
         if(old!=null&&!old.isRecycled())old.recycle();
     }
@@ -70,7 +90,7 @@ public final class FocusLockView extends View {
         text.setColor(Color.WHITE);
         text.setTextSize(13*density);
         text.setFakeBoldText(true);
-        canvas.drawText("LOCKED + ZOOMED  •  FIND AGAIN FOR LIVE CAMERA",
+        canvas.drawText(frozen ? "FROZEN · TAP IMAGE TO RESUME" : "LIVE TRACKING · TAP IMAGE TO FREEZE",
             20*density,199*density,text);
     }
 }
