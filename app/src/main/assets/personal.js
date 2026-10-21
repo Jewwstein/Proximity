@@ -9,7 +9,7 @@ try{items=JSON.parse(localStorage.getItem(KEY)||'{}')||{}}catch{items={}}
 const norm=s=>String(s||'').toLowerCase().replace(/^(please\s+)?(can you\s+)?(find|locate|spot|where is|where are|show me|look for)\s+/,'').replace(/^(my|the|a|an)\s+/,'').replace(/[.!?]/g,'').trim();
 const css=document.createElement('style');
 css.textContent='#teachOpen{background:#1a364a;color:#9aefff;font-size:25px;min-width:42px;width:42px}'+
-'#teachPanel{position:fixed;inset:0;z-index:20;background:#07111bed;display:none;flex-direction:column;align-items:center;text-align:center;color:white;padding:30px 15px 20px}'+
+'#teachPanel{position:fixed;inset:0;z-index:20;background:linear-gradient(180deg,#07111bfa 0%,#07111bcc 22%,#07111b38 40%,#07111b38 60%,#07111bee 78%,#07111bfa 100%);display:none;flex-direction:column;align-items:center;text-align:center;color:white;padding:30px 15px 20px}'+
 '#teachPanel.visible{display:flex}#teachPanel .head{width:100%;display:flex;justify-content:space-between;align-items:center}'+
 '#teachPanel .head button{background:#26384c;color:white}#teachName{flex:none;width:min(92%,310px);border:1px solid #567a8b;border-radius:15px;margin-top:18px;text-align:center;background:#172636}'+
 '#teachInfo{margin:12px 8px;color:#dceef6;font-size:13px}#teachReticle{flex:1;width:100%;display:flex;justify-content:center;align-items:center;pointer-events:none}'+
@@ -140,6 +140,9 @@ async function findSaved(id,item){
  finally{busy=false;if(active&&id===run)searchTimer=setTimeout(()=>findSaved(id,item),900)}
 }
 const genericBegin=begin;
+// The original FIND listener captured the old function; replace it explicitly.
+document.getElementById('find').removeEventListener('click',genericBegin);
+document.getElementById('find').addEventListener('click',()=>begin());
 begin=function(){
  if(teaching)return;
  if(panel.classList.contains('visible'))hide();
