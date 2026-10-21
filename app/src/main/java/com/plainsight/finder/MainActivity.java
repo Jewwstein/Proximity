@@ -69,6 +69,8 @@ public final class MainActivity extends ComponentActivity {
     private SharedPreferences prefs;
     private OfflineTextFinder localOcr;
     private volatile OfflineObjectFinder localObjects;
+    private volatile PersonalMatcher personalMatcher;
+    private FocusLockView focusLock;
     private int misses=0;
 
     private int dp(float n){return Math.round(n*getResources().getDisplayMetrics().density);}
@@ -96,6 +98,7 @@ public final class MainActivity extends ComponentActivity {
         localOcr=new OfflineTextFinder();
         worker.execute(()->{
             try{
+                personalMatcher=new PersonalMatcher(this);
                 localObjects=new OfflineObjectFinder(this);
                 state("Local visual detector ready · all searches stay on your phone");
             }catch(Exception e){
@@ -115,6 +118,9 @@ public final class MainActivity extends ComponentActivity {
         root.addView(preview,new FrameLayout.LayoutParams(-1,-1));
         overlay=new Overlay();
         root.addView(overlay,new FrameLayout.LayoutParams(-1,-1));
+        focusLock=new FocusLockView(this);
+        root.addView(focusLock,new FrameLayout.LayoutParams(-1,-1));
+        focusLock.setOnClickListener(v->{reset();state("Live camera resumed. Tap FIND to scan again.");});
 
         LinearLayout top=new LinearLayout(this);top.setOrientation(LinearLayout.VERTICAL);
         top.setPadding(dp(19),dp(21),dp(12),dp(10));
@@ -354,7 +360,7 @@ public final class MainActivity extends ComponentActivity {
         v.clearFocus();
     }
     private void reset(){
-        token++;searching=false;overlay.clear();if(zoom!=null)zoom.setVisibility(View.GONE);
+        token++;searching=false;overlay.clear();if(focusLock!=null)focusLock.clear();if(zoom!=null)zoom.setVisibility(View.GONE);
         if(searchButton!=null){searchButton.setText("FIND");searchButton.setEnabled(true);}
     }
     private String normalize(String s){
@@ -379,6 +385,11 @@ public final class MainActivity extends ComponentActivity {
             state("On-device detector loading. Check again in a moment.");
             searching=false;return;
         }
+        String personal=prefs.getString(savedKey(requested),null);
+        if(personal!=null && personalMatcher!=null){
+            state("Comparing the camera with your "+requested+" reference photos…");
+            scanPersonal(job,requested,personal);return;
+        }
         if(!localObjects.supports(requested)){
             searching=false;
             state("No offline class for '"+requested+"' yet. Try straw, keys, cup or a number.");
@@ -386,6 +397,15 @@ public final class MainActivity extends ComponentActivity {
         }
         state("On-device object scan · "+requested);
         scanObject(job,requested);
+    }
+    private void holdMatch(Bitmap snap,RectF bounds,String message) {
+        if(focusLock==null||bounds==null||snap==null){if(snap!=null)snap.recycle();return;}
+        searching=false;
+        focusLock.hold(snap,bounds);
+        overlay.clear();
+        searchButton.setEnabled(true);
+        searchButton.setText("AGAIN");
+        state(message+" · locked zoom. Tap AGAIN to scan live.");
     }
     private void scanText(int job,String value){
         if(!searching||job!=token)return;
@@ -395,17 +415,14 @@ public final class MainActivity extends ComponentActivity {
         }
         localOcr.scan(current,value,new OfflineTextFinder.Callback(){
             @Override public void onResult(RectF box){
-                current.recycle();
-                if(job!=token||!searching)return;
+                if(job!=token||!searching){current.recycle();return;}
                 if(box!=null){
-                    searching=false;
-                    overlay.show(box.left,box.top,box.right,box.bottom);
-                    state("FOUND text '"+value+"' · highlighted");
-                }else if(++misses<14){
-                    ui.postDelayed(()->scanText(job,value),300);
-                }else{
-                    searching=false;
-                    state("Couldn't read '"+value+"' · move closer or improve lighting.");
+                    // Retain the exact image that OCR inspected. Its box cannot drift.
+                    holdMatch(current,box,"FOUND text '"+value+"'");
+                }else {
+                    current.recycle();
+                    if(++misses<14)ui.postDelayed(()->scanText(job,value),300);
+                    else{searching=false;state("Couldn't read '"+value+"' · move closer.");}
                 }
             }
             @Override public void onError(String error){
@@ -425,29 +442,64 @@ public final class MainActivity extends ComponentActivity {
                 final long started=android.os.SystemClock.elapsedRealtime();
                 OfflineObjectFinder.Match match=localObjects.find(current,requested);
                 final long ms=android.os.SystemClock.elapsedRealtime()-started;
-                current.recycle();
                 ui.post(()->{
-                    if(job!=token||!searching)return;
+                    if(job!=token||!searching){current.recycle();return;}
                     if(match!=null){
-                        searching=false;
-                        overlay.show(match.bounds.left,match.bounds.top,match.bounds.right,match.bounds.bottom);
-                        state("FOUND candidate "+match.label+" · "+Math.round(match.score*100)+"% score · "+ms+" ms");
-                    }else if(++misses<5){
-                        state("Scanning "+requested+" · "+ms+" ms per frame");
-                        ui.postDelayed(()->scanObject(job,requested),160);
+                        holdMatch(current,match.bounds,"POSSIBLE "+match.label+
+                            " ("+Math.round(match.score*100)+"% model score, "+ms+" ms)");
                     }else{
-                        searching=false;
-                        state("No clear "+requested+" detected. Move closer and tap SCAN again.");
+                        current.recycle();
+                        if(++misses<5){
+                            state("Scanning "+requested+" · "+ms+" ms/frame");
+                            ui.postDelayed(()->scanObject(job,requested),160);
+                        }else{
+                            searching=false;
+                            state("No "+requested+" detected. Move closer and tap FIND again.");
+                        }
                     }
                 });
             }catch(Throwable e){
                 current.recycle();
-                android.util.Log.e("PlainSight","On-device model failure",e);
+                android.util.Log.e("PlainSight","On-device detector error",e);
+                ui.post(()->{if(job!=token)return;searching=false;
+                    state("Local detector error: "+e.getClass().getSimpleName()+" "+e.getMessage());});
+            }
+        });
+    }
+    private void scanPersonal(int job,String requested,String saved){
+        if(!searching||job!=token)return;
+        Bitmap current=frame();
+        if(current==null||current.getWidth()<50){
+            ui.postDelayed(()->scanPersonal(job,requested,saved),260);return;
+        }
+        worker.execute(()->{
+            try{
+                long started=android.os.SystemClock.elapsedRealtime();
+                PersonalMatcher.Match hit=personalMatcher.find(current,new JSONArray(saved));
+                long ms=android.os.SystemClock.elapsedRealtime()-started;
                 ui.post(()->{
-                    if(job!=token)return;
-                    searching=false;
-                    state("Local model error: "+e.getClass().getSimpleName()+" "+e.getMessage());
+                    if(job!=token||!searching){current.recycle();return;}
+                    if(hit!=null){
+                        holdMatch(current,hit.bounds,"POSSIBLE saved "+requested+
+                            " · "+hit.inliers+" feature matches · "+ms+" ms");
+                    } else{
+                        current.recycle();
+                        if(++misses<4){
+                            state("Checking saved "+requested+" from another angle · "+ms+" ms");
+                            ui.postDelayed(()->scanPersonal(job,requested,saved),190);
+                        } else if(localObjects!=null&&localObjects.supports(requested)){
+                            misses=0;state("Saved-item match uncertain · trying generic "+requested+" detector");
+                            scanObject(job,requested);
+                        } else {
+                            searching=false;
+                            state("Couldn't verify saved "+requested+". Try filling the learning guide.");
+                        }
+                    }
                 });
+            }catch(Throwable e){
+                current.recycle();
+                android.util.Log.e("PlainSight","Personal image matching error",e);
+                ui.post(()->{if(job==token){searching=false;state("Saved-item error: "+e.getMessage());}});
             }
         });
     }
