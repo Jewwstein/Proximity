@@ -500,6 +500,8 @@ public final class MainActivity extends ComponentActivity {
                             selected=appearance.box;
                             method="strong reference appearance score "+Math.round(appearance.score*100)+"%";
                         }
+                    }catch(Throwable matchingError){
+                        android.util.Log.w("PlainSight","Appearance fallback unavailable",matchingError);
                     }finally{
                         for(Bitmap image:referencePhotos)if(!image.isRecycled())image.recycle();
                     }
