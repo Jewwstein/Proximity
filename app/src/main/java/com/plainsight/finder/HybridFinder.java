@@ -1,19 +1,17 @@
 package com.plainsight.finder;
 
 import android.graphics.Bitmap;
-import android.graphics.Rect;
 import android.graphics.RectF;
-import android.util.Base64;
-import android.graphics.BitmapFactory;
 import android.util.Log;
 import org.json.JSONArray;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Fusion of general object detection and learned multi-view image matching.
- * References help distinguish a personal item; they never disable the general
- * detector. All returned regions are normalized to the ORIGINAL live frame.
+ * Staged acquisition: YOLOE generates locations; saved image features verify
+ * personal identity; DINOv2 compares overall appearance when geometric
+ * verification is inconclusive. Uncertain guesses are explicitly marked and
+ * require user approval, never presented as verified finds.
  */
 public final class HybridFinder {
     public static final class Match {
@@ -21,103 +19,118 @@ public final class HybridFinder {
         public final String label;
         public final String evidence;
         public final float score;
+        public final boolean verified;
+        public final ArrayList<RectF> alternatives;
         public Match(RectF box,String text,String provenance,float confidence){
-            region=box;label=text;evidence=provenance;score=confidence;
+            this(box,text,provenance,confidence,true,new ArrayList<>());
+        }
+        public Match(RectF box,String text,String provenance,float confidence,
+                     boolean verified,ArrayList<RectF> suggestions){
+            region=box==null?null:new RectF(box);
+            label=text;evidence=provenance;score=confidence;
+            this.verified=verified;alternatives=suggestions;
         }
     }
     private HybridFinder(){}
-    private static float clamp(float v){return Math.max(0,Math.min(1,v));}
-    private static Rect cropAround(RectF box,int w,int h){
-        float cx=box.centerX()*w,cy=box.centerY()*h;
-        float cw=Math.max(w*.24f,box.width()*w*2.9f);
-        float ch=Math.max(h*.22f,box.height()*h*2.9f);
-        int left=Math.max(0,Math.round(cx-cw/2)), top=Math.max(0,Math.round(cy-ch/2));
-        int right=Math.min(w,Math.round(cx+cw/2)), bottom=Math.min(h,Math.round(cy+ch/2));
-        if(right-left<40||bottom-top<40)return new Rect(0,0,w,h);
-        return new Rect(left,top,right,bottom);
+    private static JSONArray sampleReferences(String stored,int count)throws Exception{
+        JSONArray all=new JSONArray(stored),chosen=new JSONArray();
+        int n=Math.min(count,all.length());
+        for(int i=0;i<n;i++)
+            chosen.put(all.getString(Math.round((all.length()-1)*(i/(float)Math.max(1,n-1)))));
+        return chosen;
     }
-    private static JSONArray sampleReferences(String stored,int count) throws Exception {
-        JSONArray all=new JSONArray(stored);
-        JSONArray subset=new JSONArray();
-        if(all.length()<=count)return all;
-        for(int i=0;i<count;i++){
-            int at=Math.round((all.length()-1)*(i/(float)Math.max(1,count-1)));
-            subset.put(all.getString(at));
-        }
-        return subset;
+    private static boolean overlaps(RectF a,RectF b) {
+        RectF intersect=new RectF();
+        if(!intersect.setIntersect(a,b))return false;
+        float area=intersect.width()*intersect.height();
+        float union=a.width()*a.height()+b.width()*b.height()-area;
+        return union>0 && area/union>.36f;
     }
-    private static RectF normalize(RectF local,Rect crop,int width,int height){
-        return new RectF(
-            clamp((crop.left+local.left*crop.width())/width),
-            clamp((crop.top+local.top*crop.height())/height),
-            clamp((crop.left+local.right*crop.width())/width),
-            clamp((crop.top+local.bottom*crop.height())/height));
+    private static void appendUnique(ArrayList<RectF> list,RectF box){
+        if(box==null||box.width()<.007||box.height()<.007)return;
+        for(RectF prev:list)if(overlaps(prev,box))return;
+        list.add(new RectF(box));
     }
-    public static Match locate(Bitmap scene,String target,String references,
-         OfflineObjectFinder general,PersonalMatcher learned) throws Exception {
-        List<OfflineObjectFinder.Match> candidates=new ArrayList<>();
+    public static Match locate(Bitmap scene,String target,String stored,
+           OfflineObjectFinder general,PersonalMatcher learned,
+           DinoReidentifier dino) throws Exception {
+        ArrayList<OfflineObjectFinder.Match> proposals=new ArrayList<>();
         if(general!=null&&general.supports(target)){
-            candidates=general.findAcross(scene,target,references==null?3:6,
-                references!=null && !references.isEmpty());
+            proposals.addAll(general.findAcross(scene,target,stored==null?3:8,
+                stored!=null&&!stored.isEmpty()));
         }
-        if(references==null||references.isEmpty()){
-            if(candidates.isEmpty())return null;
-            OfflineObjectFinder.Match one=candidates.get(0);
-            return new Match(one.bounds,one.label,"universal",one.score);
+        if(stored==null||stored.isEmpty()){
+            if(proposals.isEmpty())return null;
+            OfflineObjectFinder.Match best=proposals.get(0);
+            return new Match(best.bounds,best.label,"universal",best.score);
         }
-        if(learned==null){
-            // An unavailable identity matcher must never downgrade a saved
-            // person's item to generic color/shape guesses.
-            Log.w("PlainSight","Saved-item matcher unavailable; refusing generic false positives.");
-            return null;
-        }
-        // A saved identity is not the same thing as a generic category match.
-        // NEVER advertise "found my keys" solely because YOLOE saw an object
-        // that is roughly key-shaped or dark. Mouse/controller confusion came
-        // from accepting that low-confidence fallback in the old code.
-        JSONArray refs=sampleReferences(references,12);
-        int checked=0;
-        for(OfflineObjectFinder.Match proposal:candidates){
-            checked++;
-            try {
-                ReferenceIdentityMatcher.Result identity=
-                    ReferenceIdentityMatcher.verify(scene,proposal.bounds,refs);
-                if(identity!=null){
-                    return new Match(identity.bounds,target,
-                        "EXACT reference detail: "+identity.viewsAgree+
-                        " angles · "+identity.inliers+" spatial features",proposal.score);
-                }
-            }catch(Throwable e){
-                Log.w("PlainSight","Identity verification rejected an uncertain candidate",e);
+        JSONArray views=sampleReferences(stored,12);
+        // Geometric matching can prove identity from button and trim positions,
+        // but glossy and distant items often have too few keypoints.
+        if(learned!=null){
+            for(int i=0;i<Math.min(2,proposals.size());i++){
+                try{
+                    ReferenceIdentityMatcher.Result check=
+                        ReferenceIdentityMatcher.verify(scene,proposals.get(i).bounds,views);
+                    if(check!=null)
+                        return new Match(check.bounds,target,
+                            "geometry verified: "+check.viewsAgree+
+                            " reference angles, "+check.inliers+" consistent features",
+                            proposals.get(i).score);
+                }catch(Throwable error){Log.w("PlainSight","Geometric verification failed",error);}
             }
-            if(checked>=6)break;
         }
-        // Independent geometric search can localize a saved personal item
-        // when the category detector missed something small or off-center.
-        // Seven accidental keypoints are not identity verification. Require
-        // stronger evidence and validate the returned area against references.
-        try {
-            PersonalMatcher.Match referenceHit=learned.find(scene,refs);
-            if(referenceHit!=null && referenceHit.inliers>=12){
-                ReferenceIdentityMatcher.Result verified=
-                    ReferenceIdentityMatcher.verify(scene,referenceHit.bounds,refs);
-                if(verified!=null) {
-                    return new Match(verified.bounds,target,
-                        "reference-only match · "+verified.viewsAgree+
-                        " angles · "+verified.inliers+" distinctive features",
-                        Math.min(1f,verified.inliers/24f));
+        // Instance re-identification from overall learned appearance, not merely
+        // class, color, or proximity to the center. The neural model is local.
+        ArrayList<RectF> suggestions=new ArrayList<>();
+        float primarySimilarity=-1;
+        if(dino!=null&&!proposals.isEmpty()){
+            try{
+                List<DinoReidentifier.Candidate> sorted=dino.rank(scene,views,proposals);
+                for(DinoReidentifier.Candidate p:sorted){
+                    if(primarySimilarity<0)primarySimilarity=p.similarity;
+                    appendUnique(suggestions,p.bounds);
+                    if(suggestions.size()>=3)break;
                 }
-
+            }catch(Throwable error){Log.w("PlainSight","DINO re-identification unavailable",error);}
+        }
+        // ORB searches reference photos through the wider frame even when the
+        // class detector misses the tiny physical item.
+        if(learned!=null){
+            try{
+                PersonalMatcher.Match direct=learned.find(scene,views);
+                if(direct!=null){
+                    if(direct.inliers>=16){
+                        return new Match(direct.bounds,target,
+                            "multi-view geometric feature match ("+direct.inliers+" consistent features)",
+                            Math.min(1f,direct.inliers/26f));
+                    }
+                    // Weak evidence belongs among POSSIBLE locations, never
+                    // an automatically verified match.
+                    if(direct.inliers>=7) {
+                        ArrayList<RectF> reordered=new ArrayList<>();
+                        appendUnique(reordered,direct.bounds);
+                        for(RectF p:suggestions)appendUnique(reordered,p);
+                        suggestions=reordered;
+                    }
+                }
+            }catch(Throwable error){Log.w("PlainSight","ORB instance search failed",error);}
+        }
+        if(suggestions.isEmpty()){
+            for(OfflineObjectFinder.Match p:proposals){
+                appendUnique(suggestions,p.bounds);
+                if(suggestions.size()>=3)break;
             }
-        }catch(Throwable e){
-            Log.w("PlainSight","Reference-only localization unavailable",e);
         }
-        // A false negative is preferable to highlighting a mouse as someone's
-        // saved key fob. Leave the view clear when identity is unverified.
-        if(!candidates.isEmpty()){
-            Log.i("PlainSight","Rejected "+candidates.size()+
-                " generic candidates because none matched the saved item.");
-        }
-        return null;
+        // An unknown identity is never silently reported as FOUND. The user
+        // can inspect/confirm candidates; a confirmation adds a real-world view.
+        if(suggestions.isEmpty())return null;
+        while(suggestions.size()>3)suggestions.remove(suggestions.size()-1);
+        return new Match(suggestions.get(0),target,
+            dino!=null&&primarySimilarity>=0
+                ?"unverified neural appearance candidate"
+                :"unverified general detection candidate",
+            primarySimilarity>=0?primarySimilarity:0,
+            false,suggestions);
     }
 }
