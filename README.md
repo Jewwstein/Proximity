@@ -1,13 +1,14 @@
-# Plain Sight v0.7.2 — stricter personal-object verification
+# Plain Sight v0.8.0 — Personal-object re-identification
 
-Fixes false identifications where the trained black key fob was confused with a mouse, controller, or microphone.
+The previous release overcorrected false matches and rejected a real key fob. This version adds **DINOv2-small** image embeddings to rank general YOLOE object detections against multi-angle photos of your own belongings.
 
-- **Identity confirmation:** a generic object candidate is never shown as a match for a saved personal item unless its distinctive local feature geometry matches the saved reference images. Matches must agree across multiple training views (or have much stronger evidence from one view).
-- **Buttons and trim:** references now preserve higher-resolution details, including control buttons and trim, with higher JPEG quality. New 24-view captures use these settings; old references remain readable.
-- **Search coverage:** saved-item searches inspect overlapping crops of the entire scene even when the universal detector identifies a convincing but incorrect object early.
-- **Honest misses:** when saved identity cannot be confirmed, Plain Sight says it was not verified instead of labeling an unrelated black object as your key fob.
-- The working **offline OCR**, universal object categories, and accelerated **live zoom tracking** are retained.
+- The live camera and object detector still operate offline.
+- Search for an item with saved reference photos. The phone compares DINOv2 appearance embeddings for candidate regions to up to nine selected saved angles. It also checks geometric evidence.
+- Strong multi-view geometric matches zoom and track automatically.
+- When there is insufficient proof of identity, the app shows **POSSIBLE — YES, THAT'S IT / NEXT / NONE**, with an unchanged capture frame behind the proposed box. **No more treating guesses as verified finds or silently hiding all uncertain results**.
+- Confirming a real object adds a photograph of that object in its real environment to the item memory, improving the reference set. Wrong guesses are not auto-added.
+- Live text/digit OCR, universal object detection, zoom/tracking and the option to scan 24 views are retained.
 
-A trained item uses a multi-view image collection, not a true 3D geometric reconstruction. A 3D mesh would not restore details that are too small, blurred, or hidden in the live camera image. Especially distant, reflective and low-texture key fobs can still produce missed detections. All matching remains offline.
+The DINOv2 model is a 24.5 MB quantized ONNX neural network downloaded and validated in a separate GitHub Action before being bundled in the Android APK. Real-phone accuracy and latency remain unverified. It may still fail on tiny, occluded or reflective objects, and DINOv2 does not prove that two images contain the exact same physical item.
 
-**Testing status:** GitHub Actions validates compilation. The exact key-fob recognition and speed need testing with the owner's actual objects, which are not available to this build environment.
+Security/privacy: images and embeddings processed on-device; no Gemini API key or cloud image recognition calls. Learned photos are stored in local app preferences. License obligations apply to YOLOE under AGPL-3.0; review before distributing commercially.
