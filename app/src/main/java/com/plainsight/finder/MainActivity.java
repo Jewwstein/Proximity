@@ -304,7 +304,7 @@ public final class MainActivity extends ComponentActivity {
     private Bitmap frame(){return preview.getBitmap();}
     private static String encode(Bitmap image){
         ByteArrayOutputStream out=new ByteArrayOutputStream();
-        image.compress(Bitmap.CompressFormat.JPEG,78,out);
+        image.compress(Bitmap.CompressFormat.JPEG,91,out);
         return Base64.encodeToString(out.toByteArray(),Base64.NO_WRAP);
     }
     private static Bitmap decode(String encoded){
@@ -377,7 +377,7 @@ public final class MainActivity extends ComponentActivity {
         worker.execute(()->{
             try{
                 Bitmap square=Bitmap.createBitmap(shot,x,y,side,side);
-                Bitmap resized=Bitmap.createScaledBitmap(square,384,384,true);
+                Bitmap resized=Bitmap.createScaledBitmap(square,Math.max(512,Math.min(720,side)),Math.max(512,Math.min(720,side)),true);
                 String base64=encode(resized);
                 square.recycle();resized.recycle();shot.recycle();
                 ui.post(()->{
@@ -471,7 +471,8 @@ public final class MainActivity extends ComponentActivity {
                         }else{
                             searching=false;
                             searchButton.setText("FIND");
-                            state("No convincing visual match. Scan the room from another angle.");
+                            state(saved==null?"No clear object match. Scan the room from another angle.":
+                                "Similar objects rejected: none verified as your saved "+requested+". Try another angle.");
                         }
                     }
                 });
