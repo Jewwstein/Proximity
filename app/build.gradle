@@ -1,20 +1,24 @@
 plugins { id 'com.android.application' }
-
 android {
-    namespace 'com.plainsight.finder'
-    compileSdk 35
-    defaultConfig {
-        applicationId 'com.plainsight.finder'
-        minSdk 26
-        targetSdk 35
-        versionCode 3
-        versionName '0.2.1'
-    }
-    buildTypes {
-        release { minifyEnabled false }
-    }
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
+ namespace 'com.plainsight.finder'
+ compileSdk 35
+ defaultConfig {
+   applicationId 'com.plainsight.finder'
+   minSdk 26
+   targetSdk 35
+   versionCode 4
+   versionName '0.3.0'
+ }
+ buildTypes { release { minifyEnabled false } }
+ compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+ aaptOptions { noCompress 'tflite' }
+}
+dependencies {
+ implementation 'androidx.activity:activity:1.9.3'
+ implementation 'androidx.camera:camera-core:1.4.2'
+ implementation 'androidx.camera:camera-camera2:1.4.2'
+ implementation 'androidx.camera:camera-lifecycle:1.4.2'
+ implementation 'androidx.camera:camera-view:1.4.2'
+ implementation 'com.google.mediapipe:tasks-vision:0.10.22'
+ implementation 'com.google.mlkit:image-labeling:17.0.9'
 }
