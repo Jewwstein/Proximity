@@ -482,12 +482,36 @@ public final class MainActivity extends ComponentActivity {
             try{
                 long started=android.os.SystemClock.elapsedRealtime();
                 PersonalMatcher.Match hit=personalMatcher.find(current,new JSONArray(saved));
+                RectF selected=hit==null?null:hit.bounds;
+                String method=hit==null?"":(hit.inliers+" geometric feature matches");
+                if(selected==null){
+                    // Shiny, low-texture items can lack ORB corners. Try a stricter
+                    // multi-angle appearance comparison before falling back to YOLOE.
+                    ArrayList<Bitmap> referencePhotos=new ArrayList<>();
+                    JSONArray photos=new JSONArray(saved);
+                    try{
+                        for(int i=0;i<photos.length();i++){
+                            Bitmap image=decode(photos.getString(i));
+                            if(image!=null)referencePhotos.add(image);
+                        }
+                        PersonalImageFinder.Match appearance=new PersonalImageFinder()
+                            .findPersonal(current,referencePhotos);
+                        if(appearance!=null && appearance.score>=.86){
+                            selected=appearance.box;
+                            method="strong reference appearance score "+Math.round(appearance.score*100)+"%";
+                        }
+                    }finally{
+                        for(Bitmap image:referencePhotos)if(!image.isRecycled())image.recycle();
+                    }
+                }
+                final RectF selectedBox=selected;
+                final String matchingMethod=method;
                 long ms=android.os.SystemClock.elapsedRealtime()-started;
                 ui.post(()->{
                     if(job!=token||!searching){current.recycle();return;}
-                    if(hit!=null){
-                        holdMatch(current,hit.bounds,"POSSIBLE saved "+requested+
-                            " · "+hit.inliers+" feature matches · "+ms+" ms");
+                    if(selectedBox!=null){
+                        holdMatch(current,selectedBox,"POSSIBLE saved "+requested+
+                            " · "+matchingMethod+" · "+ms+" ms");
                     } else{
                         current.recycle();
                         if(++misses<4){
