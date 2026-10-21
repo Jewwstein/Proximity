@@ -98,12 +98,18 @@ public final class MainActivity extends ComponentActivity {
         localOcr=new OfflineTextFinder();
         worker.execute(()->{
             try{
-                personalMatcher=new PersonalMatcher(this);
                 localObjects=new OfflineObjectFinder(this);
-                state("Local visual detector ready · all searches stay on your phone");
+                state("Local object detector ready · no cloud needed");
             }catch(Exception e){
                 android.util.Log.e("PlainSight","Offline object model failed",e);
                 state("Object AI failed to load: "+e.getMessage());
+            }
+            try{
+                personalMatcher=new PersonalMatcher(this);
+                state("Local object and saved-image matchers ready");
+            }catch(Throwable e){
+                android.util.Log.e("PlainSight","Saved-image matcher unavailable",e);
+                state("Saved-image matcher unavailable: "+e.getMessage());
             }
         });
         if(ContextCompat.checkSelfPermission(this,Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED)
