@@ -1,4 +1,4 @@
-# Plain Sight Android v0.7.0
+# Plain Sight Android v0.7.1
 
 Native Android application, source in the `plain-sight-android` branch.
 
@@ -6,7 +6,7 @@ Native Android application, source in the `plain-sight-android` branch.
 
 - Retains the proven fast on-device ML Kit recognition of printed text and digits.
 - General YOLOE object detector scans the **whole camera frame plus overlapping tiles**, instead of needing the target centered in a narrow view.
-- When searching a trained item, detection and saved multi-view image matching are **combined**, so a failed exact reference match does not suppress universal recognition.
+- When searching a trained item, detection and saved multi-view image matching are **combined**, so a failed exact reference match does not suppress universal recognition. A unique saved name like 'house keys' also matches a query for 'keys'.
 - The training action captures **24 distinct timed views** as you rotate and tilt an object. Previous 8-view saves remain compatible.
 - On detection the camera and highlight zoom **together** using Android GPU view transformations. Lower-resolution optical-flow frames update the selected position and the displayed live camera zoom. Tap the view to pause on the last matched frame, then tap the frozen view to search again.
 - Tracking uses fewer optical-flow points and reuses features for multiple frames. The detector is not re-run for each camera frame.
