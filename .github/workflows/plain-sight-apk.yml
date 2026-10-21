@@ -35,12 +35,12 @@ jobs:
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: PlainSight-Offline-v0.6.0
+          name: PlainSight-Offline-v0.6.1
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
       - name: Publish test APK
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk PlainSight-v0.6.0.apk
-          gh release create plain-sight-v0.6.0 PlainSight-v0.6.0.apk --target "$GITHUB_SHA" --title "Plain Sight v0.6.0 — Offline visual search" --notes "Adds zoomed frozen found-object frame, preserves fast on-device OCR, and matches saved key photos through OpenCV ORB feature geometry. Includes offline YOLOE. Experimental, not physically device-tested." --prerelease || gh release upload plain-sight-v0.6.0 PlainSight-v0.6.0.apk --clobber
+          cp app/build/outputs/apk/debug/app-debug.apk PlainSight-v0.6.1.apk
+          gh release create plain-sight-v0.6.1 PlainSight-v0.6.1.apk --target "$GITHUB_SHA" --title "Plain Sight v0.6.1 — Offline visual search" --notes "Adds zoomed frozen found-object frame, preserves fast on-device OCR, and matches saved key photos through OpenCV ORB feature geometry. Includes offline YOLOE. Experimental, not physically device-tested." --prerelease || gh release upload plain-sight-v0.6.1 PlainSight-v0.6.1.apk --clobber
