@@ -1,19 +1,13 @@
-# Plain Sight Android v0.7.1
+# Plain Sight v0.7.2 — stricter personal-object verification
 
-Native Android application, source in the `plain-sight-android` branch.
+Fixes false identifications where the trained black key fob was confused with a mouse, controller, or microphone.
 
-## Improvements over v0.6.1
+- **Identity confirmation:** a generic object candidate is never shown as a match for a saved personal item unless its distinctive local feature geometry matches the saved reference images. Matches must agree across multiple training views (or have much stronger evidence from one view).
+- **Buttons and trim:** references now preserve higher-resolution details, including control buttons and trim, with higher JPEG quality. New 24-view captures use these settings; old references remain readable.
+- **Search coverage:** saved-item searches inspect overlapping crops of the entire scene even when the universal detector identifies a convincing but incorrect object early.
+- **Honest misses:** when saved identity cannot be confirmed, Plain Sight says it was not verified instead of labeling an unrelated black object as your key fob.
+- The working **offline OCR**, universal object categories, and accelerated **live zoom tracking** are retained.
 
-- Retains the proven fast on-device ML Kit recognition of printed text and digits.
-- General YOLOE object detector scans the **whole camera frame plus overlapping tiles**, instead of needing the target centered in a narrow view.
-- When searching a trained item, detection and saved multi-view image matching are **combined**, so a failed exact reference match does not suppress universal recognition. A unique saved name like 'house keys' also matches a query for 'keys'.
-- The training action captures **24 distinct timed views** as you rotate and tilt an object. Previous 8-view saves remain compatible.
-- On detection the camera and highlight zoom **together** using Android GPU view transformations. Lower-resolution optical-flow frames update the selected position and the displayed live camera zoom. Tap the view to pause on the last matched frame, then tap the frozen view to search again.
-- Tracking uses fewer optical-flow points and reuses features for multiple frames. The detector is not re-run for each camera frame.
+A trained item uses a multi-view image collection, not a true 3D geometric reconstruction. A 3D mesh would not restore details that are too small, blurred, or hidden in the live camera image. Especially distant, reflective and low-texture key fobs can still produce missed detections. All matching remains offline.
 
-## Limitations / test scope
-
-The saved multi-angle photographs are **not a reconstructed 3D mesh**; that is not required for multi-view visual matching and does not solve occlusion of fully hidden items.
-Recognition remains experimental for distant, tiny, low-contrast, reflective, or heavily occluded objects. The local YOLOE detector has 62 preselected classes, not literally universal recognition. Feature geometry can fail for shiny or textureless keys. Learned references and universal predictions are candidates, not guaranteed identities. The app has been built via GitHub Actions but **not tested on the user's phone**. No performance promise can be made without testing on a physical device.
-
-No cloud AI calls or API key are used during searches. Camera images and learned reference photos stay local. YOLOE weights have Ultralytics AGPL-3.0 licensing; review before paid distribution.
+**Testing status:** GitHub Actions validates compilation. The exact key-fob recognition and speed need testing with the owner's actual objects, which are not available to this build environment.
