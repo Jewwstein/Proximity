@@ -6,8 +6,8 @@ android {
    applicationId 'com.plainsight.finder'
    minSdk 26
    targetSdk 35
-   versionCode 10
-   versionName '0.5.2'
+   versionCode 11
+   versionName '0.6.0'
    ndk { abiFilters 'arm64-v8a' }
  }
  buildTypes { release { minifyEnabled false } }
@@ -20,5 +20,6 @@ dependencies {
  implementation 'androidx.camera:camera-lifecycle:1.4.2'
  implementation 'androidx.camera:camera-view:1.4.2'
  implementation 'com.google.mlkit:text-recognition:16.0.1'
+ implementation 'org.opencv:opencv:4.10.0'
  implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.23.2'
 }
