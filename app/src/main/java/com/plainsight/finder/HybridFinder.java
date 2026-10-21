@@ -64,43 +64,59 @@ public final class HybridFinder {
             OfflineObjectFinder.Match one=candidates.get(0);
             return new Match(one.bounds,one.label,"universal",one.score);
         }
-        JSONArray refs=sampleReferences(references,10);
-        // Verify general proposals with multi-angle appearance. Regions near the
-        // edge of the frame are included in the general scan.
-        int w=scene.getWidth(),h=scene.getHeight();
-        int checks=Math.min(3,candidates.size());
-        for(int i=0;i<checks;i++){
-            OfflineObjectFinder.Match proposal=candidates.get(i);
-            Rect roi=cropAround(proposal.bounds,w,h);
-            Bitmap patch=Bitmap.createBitmap(scene,roi.left,roi.top,roi.width(),roi.height());
-            try{
-                PersonalMatcher.Match confirmed=learned.find(patch,refs);
-                if(confirmed!=null){
-                    RectF mapped=normalize(confirmed.bounds,roi,w,h);
-                    if(mapped.width()>.002f&&mapped.height()>.002f)
-                        return new Match(mapped,target,"universal + saved 360 reference ("+
-                             confirmed.inliers+" geometric matches)",proposal.score);
+        // A saved identity is not the same thing as a generic category match.
+        // NEVER advertise "found my keys" solely because YOLOE saw an object
+        // that is roughly key-shaped or dark. Mouse/controller confusion came
+        // from accepting that low-confidence fallback in the old code.
+        JSONArray refs=sampleReferences(references,15);
+        int checked=0;
+        for(OfflineObjectFinder.Match proposal:candidates){
+            checked++;
+            try {
+                ReferenceIdentityMatcher.Result identity=
+                    ReferenceIdentityMatcher.verify(scene,proposal.bounds,refs);
+                if(identity!=null){
+                    return new Match(identity.bounds,target,
+                        "EXACT reference detail: "+identity.viewsAgree+
+                        " angles · "+identity.inliers+" spatial features",proposal.score);
                 }
-            }catch(Exception error){
-                Log.w("PlainSight","Reference candidate check failed",error);
-            }finally{patch.recycle();}
-        }
-        // Search for the particular object from learned reference angles even
-        // if the general category detector offered no boxes.
-        try{
-            PersonalMatcher.Match personal=learned.find(scene,refs);
-            if(personal!=null){
-                return new Match(personal.bounds,target,"saved multi-view geometry",
-                    Math.min(1f,personal.inliers/28f));
+            }catch(Throwable e){
+                Log.w("PlainSight","Identity verification rejected an uncertain candidate",e);
             }
-        }catch(Exception error){
-            Log.w("PlainSight","Full-scene reference matching failed",error);
+            if(checked>=5)break;
         }
-        // Never block the general detector merely because a learned reference
-        // wasn't convincing: explicitly describe it as an unverified candidate.
+        // Independent geometric search can localize a saved personal item
+        // when the category detector missed something small or off-center.
+        // Seven accidental keypoints are not identity verification. Require
+        // stronger evidence and validate the returned area against references.
+        try {
+            PersonalMatcher.Match referenceHit=learned.find(scene,refs);
+            if(referenceHit!=null && referenceHit.inliers>=12){
+                ReferenceIdentityMatcher.Result verified=
+                    ReferenceIdentityMatcher.verify(scene,referenceHit.bounds,refs);
+                if(verified!=null) {
+                    return new Match(verified.bounds,target,
+                        "reference-only match · "+verified.viewsAgree+
+                        " angles · "+verified.inliers+" distinctive features",
+                        Math.min(1f,verified.inliers/24f));
+                }
+                // Strong ORB RANSAC evidence may be sufficient on a small
+                // distant object where scale-invariant SIFT has few pixels.
+                // But it must substantially exceed the old 7-point threshold.
+                if(referenceHit.inliers>=20) {
+                    return new Match(referenceHit.bounds,target,
+                        "high-consensus reference geometry ("+referenceHit.inliers+" matches)",
+                        Math.min(1f,referenceHit.inliers/30f));
+                }
+            }
+        }catch(Throwable e){
+            Log.w("PlainSight","Reference-only localization unavailable",e);
+        }
+        // A false negative is preferable to highlighting a mouse as someone's
+        // saved key fob. Leave the view clear when identity is unverified.
         if(!candidates.isEmpty()){
-            OfflineObjectFinder.Match best=candidates.get(0);
-            return new Match(best.bounds,best.label,"universal candidate (saved identity unverified)",best.score);
+            Log.i("PlainSight","Rejected "+candidates.size()+
+                " generic candidates because none matched the saved item.");
         }
         return null;
     }
