@@ -1,10 +1,11 @@
-name: Validate image-guided YOLOE recognition
+name: Compare real image-guided detection engines
 on:
   push:
     branches: [plain-sight-android]
     paths:
       - benchmarks/yoloe_visual_prompt.py
       - benchmarks/yoloe_real_fob.py
+      - benchmarks/owlv2_image_guided.py
       - .github/workflows/visual-prompt-benchmark.yml
   workflow_dispatch:
 permissions:
@@ -22,11 +23,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install 'ultralytics>=8.4.0' pillow numpy
-      - name: Test real photographed car key fob against clutter
+      - name: Test YOLOE real key fob against clutter (record failures)
+        continue-on-error: true
         env:
           OMP_NUM_THREADS: '2'
           MKL_NUM_THREADS: '2'
         run: python benchmarks/yoloe_real_fob.py
+      - name: Install OWLv2 model support
+        run: pip install 'transformers>=4.57,<5' safetensors
+      - name: Test OWLv2 image-guided detection with same fob and negatives
+        env:
+          OMP_NUM_THREADS: '2'
+          MKL_NUM_THREADS: '2'
+          HF_HUB_DISABLE_XET: '1'
+        run: python benchmarks/owlv2_image_guided.py
       - name: Test true image-example model on positive and negative scenes
         env:
           OMP_NUM_THREADS: '2'
@@ -35,5 +45,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: YOLOE-Visual-Prompt-Validation
+          name: Image-Guided-Model-Comparison
           path: benchmarks/reports/
