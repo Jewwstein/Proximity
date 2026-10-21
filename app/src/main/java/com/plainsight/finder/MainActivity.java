@@ -67,6 +67,9 @@ public final class MainActivity extends ComponentActivity {
     private String learningItem="";
     private final ArrayList<String> angles=new ArrayList<>();
     private SharedPreferences prefs;
+    private OfflineTextFinder localOcr;
+    private volatile OfflineObjectFinder localObjects;
+    private int misses=0;
 
     private int dp(float n){return Math.round(n*getResources().getDisplayMetrics().density);}
     private GradientDrawable rounded(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
@@ -88,10 +91,21 @@ public final class MainActivity extends ComponentActivity {
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_STABLE|View.SYSTEM_UI_FLAG_FULLSCREEN);
         constructUi();
+        // This revision performs image analysis locally; never transmit camera frames.
+        prefs.edit().remove("api_key").apply();
+        localOcr=new OfflineTextFinder();
+        worker.execute(()->{
+            try{
+                localObjects=new OfflineObjectFinder(this);
+                state("Local visual detector ready · all searches stay on your phone");
+            }catch(Exception e){
+                android.util.Log.e("PlainSight","Offline object model failed",e);
+                state("Object AI failed to load: "+e.getMessage());
+            }
+        });
         if(ContextCompat.checkSelfPermission(this,Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.CAMERA},REQ_CAMERA);
         else connectCamera();
-        if(prefs.getString("api_key","").isEmpty())ui.postDelayed(this::openKey,400);
     }
     private void constructUi(){
         root=new FrameLayout(this);root.setBackgroundColor(INK);setContentView(root);
@@ -111,7 +125,7 @@ public final class MainActivity extends ComponentActivity {
         headline.addView(label("PLAIN SIGHT",21,CYAN,true),new LinearLayout.LayoutParams(0,dp(46),1));
         Button settings=button("AI KEY",0xff214054,CYAN);
         headline.addView(settings,new LinearLayout.LayoutParams(dp(73),dp(42)));
-        settings.setOnClickListener(v->openKey());
+        settings.setVisibility(View.GONE);
         top.addView(headline,new LinearLayout.LayoutParams(-1,dp(46)));
         status=label("Starting camera…",13,WHITE,false);
         status.setMaxLines(4);
@@ -241,7 +255,7 @@ public final class MainActivity extends ComponentActivity {
                 Preview p=new Preview.Builder().build();
                 p.setSurfaceProvider(preview.getSurfaceProvider());
                 cameraProvider.bindToLifecycle(this,CameraSelector.DEFAULT_BACK_CAMERA,p);
-                state("Camera live. Enter AI key once; then say what to find.");
+                state("Camera live · all searches are offline");
             }catch(Exception e){state("Camera failure: "+e.getMessage());}
         },ContextCompat.getMainExecutor(this));
     }
@@ -348,54 +362,92 @@ public final class MainActivity extends ComponentActivity {
             .replaceFirst("(?i)^(my|the|a|an)\\s+","").trim();
     }
     private void search(){
-        String target=normalize(query.getText().toString());
-        if(target.isEmpty()){query.setError("What should I find?");return;}
+        String requested=normalize(query.getText().toString());
+        if(requested.isEmpty()){query.setError("What should I find?");return;}
         if(learning){state("Finish recording the item first.");return;}
-        String apiKey=prefs.getString("api_key","");
-        if(apiKey.isEmpty()){openKey();return;}
-        closeLearn();reset();
-        Bitmap scene=frame();
-        if(scene==null||scene.getWidth()<50){state("Camera frame not ready yet. Press FIND again after the preview appears.");return;}
-        searching=true;searchButton.setEnabled(false);searchButton.setText("···");
-        hideKeyboard(query);
-        int request=token;
-        state("AI searching for '"+target+"' · hold the phone steady…");
-        worker.execute(()->{
-            ArrayList<Bitmap> refs=new ArrayList<>();
-            try {
-                String saved=prefs.getString(savedKey(target),"");
-                if(!saved.isEmpty()){
-                    JSONArray array=new JSONArray(saved);
-                    for(int i=0;i<array.length();i+=Math.max(1,array.length()/4)){
-                        Bitmap b=decode(array.getString(i));if(b!=null)refs.add(b);
-                        if(refs.size()>=4)break;
-                    }
+        closeLearn();reset();hideKeyboard(query);
+        final int job=token;
+        misses=0;searching=true;
+        searchButton.setText("SCAN");searchButton.setEnabled(true);
+        String digit=OfflineTextFinder.searchTerm(requested);
+        if(digit!=null){
+            state("Offline text search · "+digit);
+            scanText(job,digit);
+            return;
+        }
+        if(localObjects==null){
+            state("On-device detector loading. Check again in a moment.");
+            searching=false;return;
+        }
+        if(!localObjects.supports(requested)){
+            searching=false;
+            state("No offline class for '"+requested+"' yet. Try straw, keys, cup or a number.");
+            return;
+        }
+        state("On-device object scan · "+requested);
+        scanObject(job,requested);
+    }
+    private void scanText(int job,String value){
+        if(!searching||job!=token)return;
+        Bitmap current=frame();
+        if(current==null||current.getWidth()<50){
+            ui.postDelayed(()->scanText(job,value),250);return;
+        }
+        localOcr.scan(current,value,new OfflineTextFinder.Callback(){
+            @Override public void onResult(RectF box){
+                current.recycle();
+                if(job!=token||!searching)return;
+                if(box!=null){
+                    searching=false;
+                    overlay.show(box.left,box.top,box.right,box.bottom);
+                    state("FOUND text '"+value+"' · highlighted");
+                }else if(++misses<14){
+                    ui.postDelayed(()->scanText(job,value),300);
+                }else{
+                    searching=false;
+                    state("Couldn't read '"+value+"' · move closer or improve lighting.");
                 }
-                GeminiLocator.Result result=GeminiLocator.locate(apiKey,target,scene,refs);
+            }
+            @Override public void onError(String error){
+                current.recycle();if(job!=token)return;
+                searching=false;state("Offline text error: "+error);
+            }
+        });
+    }
+    private void scanObject(int job,String requested){
+        if(!searching||job!=token)return;
+        Bitmap current=frame();
+        if(current==null||current.getWidth()<50){
+            ui.postDelayed(()->scanObject(job,requested),250);return;
+        }
+        worker.execute(()->{
+            try{
+                final long started=android.os.SystemClock.elapsedRealtime();
+                OfflineObjectFinder.Match match=localObjects.find(current,requested);
+                final long ms=android.os.SystemClock.elapsedRealtime()-started;
+                current.recycle();
                 ui.post(()->{
-                    if(request!=token)return;
-                    searching=false;searchButton.setEnabled(true);searchButton.setText("AGAIN");
-                    if(result.found){
-                        overlay.show(result.left,result.top,result.right,result.bottom);
-                        setMagnifier(scene,result);
-                        state("POSSIBLE MATCH · "+result.label+" · "+result.description);
+                    if(job!=token||!searching)return;
+                    if(match!=null){
+                        searching=false;
+                        overlay.show(match.bounds.left,match.bounds.top,match.bounds.right,match.bounds.bottom);
+                        state("FOUND candidate "+match.label+" · "+Math.round(match.score*100)+"% score · "+ms+" ms");
+                    }else if(++misses<5){
+                        state("Scanning "+requested+" · "+ms+" ms per frame");
+                        ui.postDelayed(()->scanObject(job,requested),160);
                     }else{
-                        state("Not confidently found. Point closer or try a different angle. "+result.description);
+                        searching=false;
+                        state("No clear "+requested+" detected. Move closer and tap SCAN again.");
                     }
                 });
-            }catch(Exception e){
-                android.util.Log.e("PlainSight","Cloud visual search error",e);
+            }catch(Throwable e){
+                current.recycle();
+                android.util.Log.e("PlainSight","On-device model failure",e);
                 ui.post(()->{
-                    if(request!=token)return;
-                    searching=false;searchButton.setEnabled(true);searchButton.setText("RETRY");
-                    String msg=String.valueOf(e.getMessage());
-                    if(msg.length()>200)msg=msg.substring(0,200);
-                    state("AI error: "+msg);
+                    if(job!=token)return;
+                    searching=false;
+                    state("Local model error: "+e.getClass().getSimpleName()+" "+e.getMessage());
                 });
-            }finally{
-                for(Bitmap r:refs)r.recycle();
-                // Retain the camera frame until the UI magnifier has had a chance to draw.
-                ui.postDelayed(()->{if(!scene.isRecycled())scene.recycle();},3000);
             }
         });
     }
@@ -431,7 +483,12 @@ public final class MainActivity extends ComponentActivity {
         reset();state("Ready.");
     }
     @Override protected void onPause(){reset();super.onPause();}
-    @Override protected void onDestroy(){reset();worker.shutdownNow();super.onDestroy();}
+    @Override protected void onDestroy(){
+        reset();worker.shutdownNow();
+        if(localOcr!=null)localOcr.close();
+        if(localObjects!=null)try{localObjects.close();}catch(Exception ignored){}
+        super.onDestroy();
+    }
     private final class Overlay extends View {
         private final Paint paint=new Paint(3);
         private RectF box;

@@ -1,26 +1,14 @@
-# Plain Sight v0.4.1 — Real AI vision
+# Plain Sight v0.5.0 · fast offline detector
 
-This iteration **replaces** the old weak ML Kit whole-image classifier and MobileNet visual similarity matcher. They did not do arbitrary object detection, which is why the first versions failed the key-fob test.
+This build **does not call Gemini** for searches. It uses an on-device YOLOE-26n detector exported with 62 categories including keys, car key fobs, drinking straws, cups, glasses, tools, clothing, remotes and more. Android's bundled ML Kit OCR recognizes numbers and written words such as 'find the number seven', independent of the object detector. Both modes return bounding rectangles to the always-live native camera.
 
-## Current test APK
-- CameraX preview always live (camera isn't deliberately paused).
-- Type or speak **Find my keys**, **Find the ketchup**, or **Find the blue shirt**; a Gemini 3.8 Flash API request tries to return actual bounding box coordinates around the requested item in the live camera frame.
-- Use + to learn your key fob from 8 rotated views; it stores 8 compressed JPEG photos privately on device. Search that saved name to send 4 reference views **and** a new live scene to Gemini.
-- A blue outline and a magnified inset appear when Gemini returns a plausible match.
-- No large ML models to download. App requires network during searches.
-- API authentication **required**: enter your own Google AI Studio Gemini API key inside app using AI KEY button. For testing only. **Never place shared/proprietary API keys in client applications**. Commercial release requires backend-based auth, quota controls and key protection.
-- Camera data and optional saved reference photos are transmitted to the Gemini API on FIND; photos stay stored locally until a request.
-- The app does NOT create a true 3D model or optical camera zoom.
+- No API key is required. Old saved test key is cleared from the app's preferences.
+- Tap FIND or use voice. Numbers/letters use offline text recognition; named supported objects use YOLOE.
+- Detection runs on a background executor, avoiding a frozen preview.
+- The detector is a **bounded** vocabulary, not truly universal. It cannot reliably locate every novel object, and small thin straws or shiny key fobs may not be detected in difficult scenes.
+- The saved-image 'learn' flow is retained, but those eight photos are not yet used by this local detector. We will not claim that individual identity matching is working.
+- The Ultralytics YOLOE model carries AGPL-3.0 licensing. Review its obligations before commercial redistribution.
+- **No physical-device testing yet**. GitHub Actions compilation alone is not a correctness guarantee.
 
-## First run
-1. Install from the v0.4.1 prerelease; allow camera.
-2. Tap **GET A GOOGLE AI STUDIO KEY** in the initial key screen, generate your own key, and paste it in the app. Don't post your key in chat, GitHub, or screenshots.
-3. To test universal mode, aim at your keys and speak "Find my keys" then keep the phone still for the request. On a return the app highlights a box or honestly says it couldn't identify the object.
-4. For personal mode, tap +, give your item the same name you'll search, and rotate for eight captured photos. Then FIND sends selected reference views alongside the camera image.
-5. Every press of FIND sends a request that may use rate limits or billing quota. Do not run repeated searches unnecessarily.
-
-## Not yet validated
-GitHub Actions confirms Android **compilation** only. We have not demonstrated that the external API will return the correct key-fob bounding box on the user's phone. Cloud model calls may be delayed, charge for usage, or fail on account permissions/rate limits. Accuracy remains experimental.
-
-Official image localization API: https://ai.google.dev/gemini-api/docs/image-understanding
-API key safety: https://ai.google.dev/gemini-api/docs/api-key
+## Build
+GitHub Actions fetches a successful model-export artifact created by `export-yoloe.yml`, bundles the ONNX model and category list in the APK, and builds a debug-signed APK with Android CameraX, ONNX Runtime, and ML Kit OCR.
