@@ -9,7 +9,17 @@ print("Model",names[:12],flush=True)
 print("Inputs",[(i.name,i.shape) for i in session.get_inputs()])
 print("Outputs",[(i.name,i.shape) for i in session.get_outputs()])
 url="https://images.pexels.com/photos/3162037/pexels-photo-3162037.jpeg?auto=compress&cs=tinysrgb&w=720"
-urllib.request.urlretrieve(url,"sample.jpg")
+try:
+ urllib.request.urlretrieve(url,"sample.jpg")
+ print("REAL PHOTO DOWNLOADED",flush=True)
+except Exception as e:
+ print("REAL IMAGE UNAVAILABLE, using synthetic scene for tensor/latency test only:",e,flush=True)
+ from PIL import ImageDraw
+ test=Image.new("RGB",(640,640),(155,156,159))
+ draw=ImageDraw.Draw(test)
+ draw.ellipse([160,160,480,530],outline=(220,220,225),width=9)
+ draw.line([335,360,435,60],fill=(238,50,48),width=18)
+ test.save("sample.jpg")
 img=Image.open("sample.jpg").convert("RGB").resize((320,320))
 arr=np.array(img,dtype=np.float32)/255.
 batch=np.ascontiguousarray(arr.transpose(2,0,1)[None])

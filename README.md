@@ -1,4 +1,4 @@
-# Plain Sight v0.5.0 · fast offline detector
+# Plain Sight v0.5.1 · fast offline detector
 
 This build **does not call Gemini** for searches. It uses an on-device YOLOE-26n detector exported with 62 categories including keys, car key fobs, drinking straws, cups, glasses, tools, clothing, remotes and more. Android's bundled ML Kit OCR recognizes numbers and written words such as 'find the number seven', independent of the object detector. Both modes return bounding rectangles to the always-live native camera.
 
