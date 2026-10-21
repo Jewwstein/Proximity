@@ -312,6 +312,25 @@ public final class MainActivity extends ComponentActivity {
         return BitmapFactory.decodeByteArray(bytes,0,bytes.length);
     }
     private String savedKey(String name){return "item:"+name.trim().toLowerCase(Locale.ROOT);}
+    private String referencesFor(String requested){
+        String exact=prefs.getString(savedKey(requested),null);
+        if(exact!=null)return exact;
+        // "house keys" and "keys" should refer to the same learned object
+        // when there is only one plausible matching item in storage.
+        String q=requested.trim().toLowerCase(Locale.ROOT);
+        String unique=null;int matches=0;
+        for(String key:prefs.getAll().keySet()){
+            if(!key.startsWith("item:"))continue;
+            String name=key.substring(5);
+            boolean alias=name.endsWith(" "+q) || q.endsWith(" "+name) ||
+                (q.equals("keys") && name.contains("key")) ||
+                (q.equals("key") && name.contains("key"));
+            if(!alias)continue;
+            String candidate=prefs.getString(key,null);
+            if(candidate!=null){unique=candidate;matches++;}
+        }
+        return matches==1?unique:null; // ambiguous aliases keep generic detection
+    }
     private void openLearn(){
         reset();keyPanel.setVisibility(View.GONE);
         learnName.setText("");learnCount.setText("Hold your item in the guide");
@@ -417,7 +436,7 @@ public final class MainActivity extends ComponentActivity {
             state("On-device detector loading. Check again in a moment.");
             searching=false;return;
         }
-        String personal=prefs.getString(savedKey(requested),null);
+        String personal=referencesFor(requested);
         if(personal==null && !localObjects.supports(requested)){
             searching=false;
             state("No offline class for '"+requested+"' yet. Try straw, keys, cup or a number.");
