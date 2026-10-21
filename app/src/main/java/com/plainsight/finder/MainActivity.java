@@ -71,6 +71,9 @@ public final class MainActivity extends ComponentActivity {
     private volatile OfflineObjectFinder localObjects;
     private volatile PersonalMatcher personalMatcher;
     private FocusLockView focusLock;
+    private MotionTracker motionTracker;
+    private int followSerial=0;
+    private boolean followActive=false;
     private int misses=0;
 
     private int dp(float n){return Math.round(n*getResources().getDisplayMetrics().density);}
@@ -106,6 +109,7 @@ public final class MainActivity extends ComponentActivity {
             }
             try{
                 personalMatcher=new PersonalMatcher(this);
+                motionTracker=new MotionTracker();
                 state("Local object and saved-image matchers ready");
             }catch(Throwable e){
                 android.util.Log.e("PlainSight","Saved-image matcher unavailable",e);
@@ -126,7 +130,17 @@ public final class MainActivity extends ComponentActivity {
         root.addView(overlay,new FrameLayout.LayoutParams(-1,-1));
         focusLock=new FocusLockView(this);
         root.addView(focusLock,new FrameLayout.LayoutParams(-1,-1));
-        focusLock.setOnClickListener(v->{reset();state("Live camera resumed. Tap FIND to scan again.");});
+        focusLock.setOnClickListener(v->{
+            if(focusLock.isFrozen()){
+                reset();
+                state("Rescanning to reacquire the object after pause…");
+                search();
+            }else if(focusLock.isHeld()){
+                followActive=false;followSerial++;
+                focusLock.toggleFreeze();
+                state("Zoom paused at the selected target. Tap image to rescan, or FIND for a new target.");
+            }
+        });
 
         LinearLayout top=new LinearLayout(this);top.setOrientation(LinearLayout.VERTICAL);
         top.setPadding(dp(19),dp(21),dp(12),dp(10));
@@ -366,6 +380,7 @@ public final class MainActivity extends ComponentActivity {
         v.clearFocus();
     }
     private void reset(){
+        followSerial++;followActive=false;
         token++;searching=false;overlay.clear();if(focusLock!=null)focusLock.clear();if(zoom!=null)zoom.setVisibility(View.GONE);
         if(searchButton!=null){searchButton.setText("FIND");searchButton.setEnabled(true);}
     }
@@ -404,14 +419,69 @@ public final class MainActivity extends ComponentActivity {
         state("On-device object scan · "+requested);
         scanObject(job,requested);
     }
+    private Bitmap smallForTracking(Bitmap full) {
+        int longest=Math.max(full.getWidth(),full.getHeight());
+        if(longest<=980)return full.copy(Bitmap.Config.ARGB_8888,false);
+        float scale=980f/longest;
+        return Bitmap.createScaledBitmap(full,Math.max(1,Math.round(full.getWidth()*scale)),
+            Math.max(1,Math.round(full.getHeight()*scale)),true);
+    }
     private void holdMatch(Bitmap snap,RectF bounds,String message) {
         if(focusLock==null||bounds==null||snap==null){if(snap!=null)snap.recycle();return;}
         searching=false;
         focusLock.hold(snap,bounds);
         overlay.clear();
         searchButton.setEnabled(true);
-        searchButton.setText("AGAIN");
-        state(message+" · locked zoom. Tap AGAIN to scan live.");
+        searchButton.setText("FIND");
+        state(message+" · digitally zoomed; tracking movement");
+        followSerial++;
+        final int session=followSerial;
+        if(motionTracker==null){
+            state(message+" · zoomed snapshot (tracking engine unavailable)");
+            return;
+        }
+        followActive=true;
+        final Bitmap scaled=smallForTracking(snap);
+        worker.execute(()->{
+            boolean initialized=false;
+            try {initialized=motionTracker.begin(scaled,bounds);}
+            catch(Throwable e){android.util.Log.e("PlainSight","Tracking initialization failed",e);}
+            finally {scaled.recycle();}
+            final boolean canFollow=initialized;
+            ui.post(()->{
+                if(session!=followSerial||!focusLock.isHeld())return;
+                if(canFollow)ui.postDelayed(()->followSelection(session),90);
+                else{followActive=false;state(message+" · zoomed snapshot; not enough detail for tracking");}
+            });
+        });
+    }
+    private void followSelection(int session){
+        if(!followActive||session!=followSerial||focusLock==null||focusLock.isFrozen())return;
+        Bitmap screen=frame();
+        if(screen==null||screen.getWidth()<40){
+            ui.postDelayed(()->followSelection(session),180);
+            return;
+        }
+        Bitmap sampled=smallForTracking(screen);
+        screen.recycle();
+        worker.execute(()->{
+            RectF updated=null;
+            try{updated=motionTracker.advance(sampled);}
+            catch(Throwable e){android.util.Log.w("PlainSight","Optical tracking failed",e);}
+            final RectF region=updated;
+            ui.post(()->{
+                if(!followActive||session!=followSerial||focusLock.isFrozen()){
+                    sampled.recycle();return;
+                }
+                if(region==null){
+                    sampled.recycle();followActive=false;
+                    state("Tracking lost. Zoom paused on the last frame; tap FIND to find it again.");
+                    return;
+                }
+                focusLock.follow(sampled,region);
+                ui.postDelayed(()->followSelection(session),145);
+            });
+        });
     }
     private void scanText(int job,String value){
         if(!searching||job!=token)return;
@@ -569,6 +639,7 @@ public final class MainActivity extends ComponentActivity {
     @Override protected void onPause(){reset();super.onPause();}
     @Override protected void onDestroy(){
         reset();worker.shutdownNow();
+        if(motionTracker!=null)motionTracker.close();
         if(localOcr!=null)localOcr.close();
         if(localObjects!=null)try{localObjects.close();}catch(Exception ignored){}
         super.onDestroy();
