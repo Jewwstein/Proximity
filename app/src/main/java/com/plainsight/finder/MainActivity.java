@@ -211,11 +211,11 @@ public final class MainActivity extends ComponentActivity {
         learnName.setPadding(dp(14),0,dp(14),0);learnName.setBackground(rounded(0xff19374b,13));
         LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(-1,dp(52));np.topMargin=dp(12);
         teachPanel.addView(learnName,np);
-        TextView tip=label("Center only your item. Slowly rotate it while eight reference photographs are taken.",14,WHITE,false);
+        TextView tip=label("Center your item, rotate it once, then tilt to show top and bottom. Plain Sight captures 24 views.",14,WHITE,false);
         tip.setGravity(Gravity.CENTER);
         teachPanel.addView(tip,new LinearLayout.LayoutParams(-1,dp(104)));
         teachPanel.addView(new View(this),new LinearLayout.LayoutParams(1,0,1));
-        learnCount=label("Hold your item in the square",14,CYAN,true);
+        learnCount=label("Hold your item in the square · rotate 360°",14,CYAN,true);
         learnCount.setGravity(Gravity.CENTER);
         teachPanel.addView(learnCount,new LinearLayout.LayoutParams(-1,dp(38)));
         learnButton=button("LEARN 360°",CYAN,INK);
@@ -349,18 +349,18 @@ public final class MainActivity extends ComponentActivity {
         worker.execute(()->{
             try{
                 Bitmap square=Bitmap.createBitmap(shot,x,y,side,side);
-                Bitmap resized=Bitmap.createScaledBitmap(square,512,512,true);
+                Bitmap resized=Bitmap.createScaledBitmap(square,384,384,true);
                 String base64=encode(resized);
                 square.recycle();resized.recycle();shot.recycle();
                 ui.post(()->{
                     angles.add(base64);frames++;
-                    learnCount.setText("Captured "+frames+" of 8 · turn your item");
-                    if(frames<8)ui.postDelayed(this::captureAngle,620);
+                    learnCount.setText("Captured "+frames+" of 24 · rotate and tilt your item");
+                    if(frames<24)ui.postDelayed(this::captureAngle,420);
                     else{
                         JSONArray arr=new JSONArray();for(String s:angles)arr.put(s);
                         prefs.edit().putString(savedKey(learningItem),arr.toString()).apply();
                         learning=false;learnButton.setEnabled(true);
-                        learnCount.setText("SAVED! Your item is ready for AI-assisted search.");
+                        learnCount.setText("SAVED 24 VIEWS! General AI and personal references now work together.");
                         query.setText(learningItem);refreshSaved();
                         state("Saved 8 real photos of "+learningItem+".");
                     }
@@ -407,17 +407,53 @@ public final class MainActivity extends ComponentActivity {
             searching=false;return;
         }
         String personal=prefs.getString(savedKey(requested),null);
-        if(personal!=null && personalMatcher!=null){
-            state("Comparing the camera with your "+requested+" reference photos…");
-            scanPersonal(job,requested,personal);return;
-        }
-        if(!localObjects.supports(requested)){
+        if(personal==null && !localObjects.supports(requested)){
             searching=false;
             state("No offline class for '"+requested+"' yet. Try straw, keys, cup or a number.");
             return;
         }
-        state("On-device object scan · "+requested);
-        scanObject(job,requested);
+        state(personal==null?"Scanning the entire scene · "+requested:
+            "Hybrid search · general AI + learned angles for "+requested);
+        scanHybrid(job,requested,personal);
+    }
+    private void scanHybrid(int job,String requested,String saved){
+        if(!searching||job!=token)return;
+        Bitmap live=frame();
+        if(live==null||live.getWidth()<80){
+            ui.postDelayed(()->scanHybrid(job,requested,saved),150);
+            return;
+        }
+        worker.execute(()->{
+            try {
+                final long begin=android.os.SystemClock.elapsedRealtime();
+                HybridFinder.Match found=HybridFinder.locate(live,requested,saved,localObjects,personalMatcher);
+                long ms=android.os.SystemClock.elapsedRealtime()-begin;
+                ui.post(()->{
+                    if(job!=token||!searching){live.recycle();return;}
+                    if(found!=null){
+                        holdMatch(live,found.region,"POSSIBLE "+found.label+
+                            " · "+found.evidence+" · "+ms+" ms");
+                    }else{
+                        live.recycle();
+                        if(++misses<3){
+                            state("Searching more of the scene · move your camera slowly");
+                            ui.postDelayed(()->scanHybrid(job,requested,saved),200);
+                        }else{
+                            searching=false;
+                            searchButton.setText("FIND");
+                            state("No convincing visual match. Scan the room from another angle.");
+                        }
+                    }
+                });
+            }catch(Throwable error){
+                live.recycle();
+                android.util.Log.e("PlainSight","Hybrid detection failed",error);
+                ui.post(()->{if(job==token){
+                    searching=false;searchButton.setText("FIND");
+                    state("Hybrid search error: "+error.getMessage());
+                }});
+            }
+        });
     }
     private Bitmap smallForTracking(Bitmap full) {
         int longest=Math.max(full.getWidth(),full.getHeight());
