@@ -57,7 +57,8 @@ public final class HybridFinder {
          OfflineObjectFinder general,PersonalMatcher learned) throws Exception {
         List<OfflineObjectFinder.Match> candidates=new ArrayList<>();
         if(general!=null&&general.supports(target)){
-            candidates=general.findAcross(scene,target,references==null?3:5);
+            candidates=general.findAcross(scene,target,references==null?3:6,
+                references!=null && !references.isEmpty());
         }
         if(references==null||references.isEmpty()){
             if(candidates.isEmpty())return null;
@@ -89,7 +90,7 @@ public final class HybridFinder {
             }catch(Throwable e){
                 Log.w("PlainSight","Identity verification rejected an uncertain candidate",e);
             }
-            if(checked>=3)break;
+            if(checked>=6)break;
         }
         // Independent geometric search can localize a saved personal item
         // when the category detector missed something small or off-center.
