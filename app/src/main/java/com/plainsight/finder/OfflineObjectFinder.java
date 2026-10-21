@@ -122,13 +122,15 @@ public final class OfflineObjectFinder implements AutoCloseable {
         if(wanted.isEmpty())return null;
         // Ultralytics models expect letterboxed 320x320 images, not distorted
         // portrait previews stretched into a square (previous implementation).
-        Match full=detect(src,query,wanted,new Rect(0,0,src.getWidth(),src.getHeight()));
-        if(full!=null)return full;
-        // A centered detail pass gives thin or small objects more usable pixels.
+        // A central close-up is first: keys, straws and other small objects
+        // become ~3x larger in the detector tensor on portrait phones.
         int w=src.getWidth(),h=src.getHeight();
-        int cropWidth=Math.round(w*.62f),cropHeight=Math.round(h*.62f);
-        return detect(src,query,wanted,new Rect((w-cropWidth)/2,(h-cropHeight)/2,
-            (w+cropWidth)/2,(h+cropHeight)/2));
+        int side=Math.max(90,Math.round(Math.min(w,h)*.70f));
+        Rect closeup=new Rect((w-side)/2,(h-side)/2,(w+side)/2,(h+side)/2);
+        Match near=detect(src,query,wanted,closeup);
+        if(near!=null)return near;
+        // Always fall back to the complete frame if nothing matched centrally.
+        return detect(src,query,wanted,new Rect(0,0,w,h));
     }
     private Match detect(Bitmap src,String query,List<Integer> wanted,Rect crop) throws Exception {
         Bitmap input=Bitmap.createBitmap(SIZE,SIZE,Bitmap.Config.ARGB_8888);
