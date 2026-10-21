@@ -59,16 +59,22 @@ public final class HybridFinder {
         if(general!=null&&general.supports(target)){
             candidates=general.findAcross(scene,target,references==null?3:5);
         }
-        if(references==null||references.isEmpty()||learned==null){
+        if(references==null||references.isEmpty()){
             if(candidates.isEmpty())return null;
             OfflineObjectFinder.Match one=candidates.get(0);
             return new Match(one.bounds,one.label,"universal",one.score);
+        }
+        if(learned==null){
+            // An unavailable identity matcher must never downgrade a saved
+            // person's item to generic color/shape guesses.
+            Log.w("PlainSight","Saved-item matcher unavailable; refusing generic false positives.");
+            return null;
         }
         // A saved identity is not the same thing as a generic category match.
         // NEVER advertise "found my keys" solely because YOLOE saw an object
         // that is roughly key-shaped or dark. Mouse/controller confusion came
         // from accepting that low-confidence fallback in the old code.
-        JSONArray refs=sampleReferences(references,15);
+        JSONArray refs=sampleReferences(references,12);
         int checked=0;
         for(OfflineObjectFinder.Match proposal:candidates){
             checked++;
@@ -83,7 +89,7 @@ public final class HybridFinder {
             }catch(Throwable e){
                 Log.w("PlainSight","Identity verification rejected an uncertain candidate",e);
             }
-            if(checked>=5)break;
+            if(checked>=3)break;
         }
         // Independent geometric search can localize a saved personal item
         // when the category detector missed something small or off-center.
@@ -100,14 +106,7 @@ public final class HybridFinder {
                         " angles · "+verified.inliers+" distinctive features",
                         Math.min(1f,verified.inliers/24f));
                 }
-                // Strong ORB RANSAC evidence may be sufficient on a small
-                // distant object where scale-invariant SIFT has few pixels.
-                // But it must substantially exceed the old 7-point threshold.
-                if(referenceHit.inliers>=20) {
-                    return new Match(referenceHit.bounds,target,
-                        "high-consensus reference geometry ("+referenceHit.inliers+" matches)",
-                        Math.min(1f,referenceHit.inliers/30f));
-                }
+
             }
         }catch(Throwable e){
             Log.w("PlainSight","Reference-only localization unavailable",e);
