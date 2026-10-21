@@ -132,6 +132,52 @@ public final class OfflineObjectFinder implements AutoCloseable {
         // Always fall back to the complete frame if nothing matched centrally.
         return detect(src,query,wanted,new Rect(0,0,w,h));
     }
+    /**
+     * Searches the entire preview plus overlapping image tiles. A distant key may
+     * occupy just a few detector pixels in the full-height portrait preview.
+     * Each tile is resized separately to improve its apparent resolution.
+     * Heavy scans run only during acquisition, never during optical-flow tracking.
+     */
+    public List<Match> findAcross(Bitmap source,String requested,int maxCandidates) throws Exception {
+        List<Integer> wanted=candidateLabels(requested);
+        if(wanted.isEmpty())return Collections.emptyList();
+        int w=source.getWidth(),h=source.getHeight();
+        ArrayList<Match> pool=new ArrayList<>();
+        Match broad=detect(source,requested,wanted,new Rect(0,0,w,h));
+        if(broad!=null)pool.add(broad);
+        // Still scan tiles after an uncertain full-frame match.
+        if(broad!=null && broad.score>=.49f) return pool;
+        int tileW=Math.max(60,Math.round(w*.63f));
+        int tileH=Math.max(60,Math.round(h*.44f));
+        for(int row=0;row<3;row++){
+            for(int col=0;col<2;col++){
+                int x=Math.round((w-tileW)*(col/1f));
+                int y=Math.round((h-tileH)*(row/2f));
+                Match candidate=detect(source,requested,wanted,
+                    new Rect(x,y,x+tileW,y+tileH));
+                if(candidate==null)continue;
+                boolean duplicate=false;
+                for(Match earlier:pool){
+                    RectF intersection=new RectF();
+                    if(intersection.setIntersect(earlier.bounds,candidate.bounds)){
+                        float union=earlier.bounds.width()*earlier.bounds.height()+
+                            candidate.bounds.width()*candidate.bounds.height()-
+                            intersection.width()*intersection.height();
+                        if(union>0 && intersection.width()*intersection.height()/union>.32f){
+                            duplicate=true;
+                            if(candidate.score>earlier.score){pool.remove(earlier);duplicate=false;}
+                            break;
+                        }
+                    }
+                }
+                if(!duplicate)pool.add(candidate);
+                if(pool.size()>=maxCandidates && pool.stream().anyMatch(c->c.score>.44f))break;
+            }
+        }
+        pool.sort((a,b)->Float.compare(b.score,a.score));
+        if(pool.size()>maxCandidates)return new ArrayList<>(pool.subList(0,maxCandidates));
+        return pool;
+    }
     private Match detect(Bitmap src,String query,List<Integer> wanted,Rect crop) throws Exception {
         Bitmap input=Bitmap.createBitmap(SIZE,SIZE,Bitmap.Config.ARGB_8888);
         Canvas canvas=new Canvas(input);
