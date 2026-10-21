@@ -26,6 +26,7 @@ public final class MotionTracker implements AutoCloseable {
     private RectF region;
     private int frameWidth,frameHeight;
     private int missed=0;
+    private int framesSinceFeatures=0;
 
     private Mat gray(Bitmap b) {
         Mat rgba=new Mat(),grayscale=new Mat();
@@ -36,8 +37,9 @@ public final class MotionTracker implements AutoCloseable {
     }
     private static float limit(float value,float min,float max){return Math.max(min,Math.min(max,value));}
     private static float median(ArrayList<Float> values) {
-        values.sort(Float::compareTo);
-        return values.get(values.size()/2);
+        ArrayList<Float> copy=new ArrayList<>(values);
+        copy.sort(Float::compareTo);
+        return copy.get(copy.size()/2);
     }
     private void pickFeatures(Mat image){
         if(points!=null)points.release();
@@ -53,7 +55,7 @@ public final class MotionTracker implements AutoCloseable {
             int t=(int)limit(cy-halfH,0,image.rows()-1),b=(int)limit(cy+halfH,1,image.rows());
             if(r<=l||b<=t){points=new MatOfPoint2f();return;}
             Imgproc.rectangle(mask,new Point(l,t),new Point(r,b),new org.opencv.core.Scalar(255),-1);
-            Imgproc.goodFeaturesToTrack(image,corners,95,.008,5,mask);
+            Imgproc.goodFeaturesToTrack(image,corners,64,.012,7,mask);
             Point[] raw=corners.toArray();
             points=new MatOfPoint2f(raw);
         } finally {
@@ -68,7 +70,7 @@ public final class MotionTracker implements AutoCloseable {
         frameWidth=frame.getWidth();frameHeight=frame.getHeight();
         region=new RectF(selected);
         pickFeatures(previous);
-        missed=0;
+        missed=0;framesSinceFeatures=0;
         return points!=null && points.rows()>=5;
     }
     public synchronized RectF advance(Bitmap frame) {
@@ -80,7 +82,7 @@ public final class MotionTracker implements AutoCloseable {
         MatOfFloat errors=new MatOfFloat();
         try {
             if(points==null||points.rows()<5)return null;
-            Video.calcOpticalFlowPyrLK(previous,next,points,updated,flags,errors,new Size(23,23),3);
+            Video.calcOpticalFlowPyrLK(previous,next,points,updated,flags,errors,new Size(17,17),2);
             Point[] oldPts=points.toArray(), newPts=updated.toArray();
             byte[] good=flags.toArray();
             ArrayList<Float> dxs=new ArrayList<>(),dys=new ArrayList<>();
@@ -114,7 +116,18 @@ public final class MotionTracker implements AutoCloseable {
             previous.release();
             previous=next;
             next=null;
-            pickFeatures(previous);
+            framesSinceFeatures++;
+            if(framesSinceFeatures>=4){
+                pickFeatures(previous);framesSinceFeatures=0;
+            }else{
+                ArrayList<Point> tracked=new ArrayList<>();
+                for(int i=0;i<Math.min(newPts.length,good.length);i++){
+                    if(good[i]!=0)tracked.add(newPts[i]);
+                }
+                if(points!=null)points.release();
+                points=new MatOfPoint2f();
+                points.fromList(tracked);
+            }
             return new RectF(region);
         }finally {
             if(next!=null)next.release();
@@ -124,7 +137,7 @@ public final class MotionTracker implements AutoCloseable {
     public synchronized void clear(){
         if(previous!=null){previous.release();previous=null;}
         if(points!=null){points.release();points=null;}
-        region=null;missed=0;
+        region=null;missed=0;framesSinceFeatures=0;
     }
     @Override public void close(){clear();}
 }
