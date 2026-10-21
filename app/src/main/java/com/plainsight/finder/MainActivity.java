@@ -61,7 +61,14 @@ public final class MainActivity extends ComponentActivity {
     private EditText query,learnName,keyField;
     private TextView status,learnCount;
     private Button searchButton,learnButton;
-    private ImageView zoom;
+    private ImageView zoom,guessImage;
+    private Overlay guessMark;
+    private LinearLayout guessControls;
+    private TextView guessTitle;
+    private Bitmap guessSnapshot;
+    private final ArrayList<RectF> guessBoxes=new ArrayList<>();
+    private int guessIndex=0;
+    private String guessName="";
     private boolean learning=false,searching=false;
     private int token=0,frames=0;
     private String learningItem="";
@@ -70,6 +77,7 @@ public final class MainActivity extends ComponentActivity {
     private OfflineTextFinder localOcr;
     private volatile OfflineObjectFinder localObjects;
     private volatile PersonalMatcher personalMatcher;
+    private volatile DinoReidentifier localDino;
     private FocusLockView focusLock;
     private MotionTracker motionTracker;
     private int followSerial=0;
@@ -118,6 +126,15 @@ public final class MainActivity extends ComponentActivity {
                 state("Saved-image matcher unavailable: "+e.getMessage());
             }
         });
+        worker.execute(()->{
+            try{
+                localDino=new DinoReidentifier(this);
+                state("DINOv2 personal-item recognition ready · camera stays offline");
+            }catch(Throwable e){
+                android.util.Log.e("PlainSight","DINOv2 startup failed",e);
+                state("Appearance model unavailable; still using standard matching.");
+            }
+        });
         if(ContextCompat.checkSelfPermission(this,Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.CAMERA},REQ_CAMERA);
         else connectCamera();
@@ -151,6 +168,15 @@ public final class MainActivity extends ComponentActivity {
             }
         });
 
+        // A frozen camera frame is shown only when the identity is uncertain:
+        // the user can choose among candidate objects without false "FOUND" claims.
+        guessImage=new ImageView(this);
+        guessImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        root.addView(guessImage,new FrameLayout.LayoutParams(-1,-1));
+        guessImage.setVisibility(View.GONE);
+        guessMark=new Overlay();
+        root.addView(guessMark,new FrameLayout.LayoutParams(-1,-1));
+        guessMark.setVisibility(View.GONE);
         LinearLayout top=new LinearLayout(this);top.setOrientation(LinearLayout.VERTICAL);
         top.setPadding(dp(19),dp(21),dp(12),dp(10));
         top.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
@@ -196,8 +222,109 @@ public final class MainActivity extends ComponentActivity {
         searchButton=button("FIND",CYAN,INK);
         LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(dp(68),dp(50));fp.leftMargin=dp(5);
         bar.addView(searchButton,fp);searchButton.setOnClickListener(v->search());
+        makeCandidateControls();
         makeTeach();
         makeKey();
+    }
+    private void makeCandidateControls(){
+        guessControls=new LinearLayout(this);
+        guessControls.setOrientation(LinearLayout.VERTICAL);
+        guessControls.setGravity(Gravity.CENTER);
+        guessControls.setPadding(dp(10),dp(8),dp(10),dp(8));
+        guessControls.setBackground(rounded(0xf5071a29,15));
+        FrameLayout.LayoutParams bp=new FrameLayout.LayoutParams(-1,dp(105),Gravity.BOTTOM);
+        bp.leftMargin=dp(12);bp.rightMargin=dp(12);bp.bottomMargin=dp(139);
+        root.addView(guessControls,bp);
+        guessTitle=label("Possibly your item — please verify",14,WHITE,true);
+        guessTitle.setGravity(Gravity.CENTER);
+        guessControls.addView(guessTitle,new LinearLayout.LayoutParams(-1,dp(32)));
+        LinearLayout actions=new LinearLayout(this);actions.setGravity(Gravity.CENTER);
+        guessControls.addView(actions,new LinearLayout.LayoutParams(-1,dp(50)));
+        Button correct=button("YES, THAT'S IT",CYAN,INK);
+        actions.addView(correct,new LinearLayout.LayoutParams(0,dp(47),1));
+        correct.setOnClickListener(v->acceptCandidate());
+        Button next=button("NEXT",0xff27485c,WHITE);
+        LinearLayout.LayoutParams n=new LinearLayout.LayoutParams(0,dp(47),.65f);n.leftMargin=dp(6);
+        actions.addView(next,n);
+        next.setOnClickListener(v->nextCandidate());
+        Button none=button("NONE",0xff573745,WHITE);
+        LinearLayout.LayoutParams x=new LinearLayout.LayoutParams(0,dp(47),.65f);x.leftMargin=dp(6);
+        actions.addView(none,x);
+        none.setOnClickListener(v->{
+            clearCandidates(true);
+            state("None matched. Move your camera, then tap FIND again.");
+        });
+        guessControls.setVisibility(View.GONE);
+    }
+    private void clearCandidates(boolean recycle){
+        if(guessImage!=null){
+            guessImage.setImageDrawable(null);
+            guessImage.setVisibility(View.GONE);
+        }
+        if(guessMark!=null){guessMark.clear();guessMark.setVisibility(View.GONE);}
+        if(guessControls!=null)guessControls.setVisibility(View.GONE);
+        if(recycle && guessSnapshot!=null && !guessSnapshot.isRecycled())guessSnapshot.recycle();
+        guessSnapshot=null;guessBoxes.clear();guessIndex=0;guessName="";
+    }
+    private void paintCandidate(){
+        if(guessSnapshot==null||guessBoxes.isEmpty())return;
+        RectF current=guessBoxes.get(guessIndex);
+        guessMark.show(current.left,current.top,current.right,current.bottom);
+        guessTitle.setText("POSSIBLE "+guessName+"?  "+(guessIndex+1)+"/"+guessBoxes.size()+
+            "  · tap YES or NEXT");
+        state("Not verified as your "+guessName+". Confirm, try NEXT, or choose NONE.");
+    }
+    private void showCandidates(Bitmap snapshot,HybridFinder.Match found,String requested){
+        searching=false;
+        clearCandidates(true);
+        guessSnapshot=snapshot;
+        guessName=requested;
+        for(RectF box:found.alternatives)guessBoxes.add(new RectF(box));
+        if(guessBoxes.isEmpty()&&found.region!=null)guessBoxes.add(new RectF(found.region));
+        if(guessBoxes.isEmpty()){clearCandidates(true);return;}
+        guessImage.setImageBitmap(guessSnapshot);
+        guessImage.setVisibility(View.VISIBLE);
+        guessMark.setVisibility(View.VISIBLE);
+        guessControls.setVisibility(View.VISIBLE);
+        searchButton.setText("FIND");
+        paintCandidate();
+    }
+    private void nextCandidate(){
+        if(guessSnapshot==null||guessBoxes.isEmpty())return;
+        guessIndex=(guessIndex+1)%guessBoxes.size();
+        paintCandidate();
+    }
+    private void acceptCandidate(){
+        if(guessSnapshot==null||guessBoxes.isEmpty())return;
+        Bitmap current=guessSnapshot;
+        RectF target=new RectF(guessBoxes.get(guessIndex));
+        String learnedName=guessName;
+        // The user's confirmation is positive supervised evidence. Save
+        // this actual camera appearance along with the previous 24 angles.
+        try{
+            int w=current.getWidth(),h=current.getHeight();
+            float size=Math.max(target.width()*w,target.height()*h)*1.16f;
+            float x=target.centerX()*w,y=target.centerY()*h;
+            int l=Math.max(0,Math.round(x-size*.5f)),t=Math.max(0,Math.round(y-size*.5f));
+            int r=Math.min(w,Math.round(x+size*.5f)),b=Math.min(h,Math.round(y+size*.5f));
+            if(r-l>=15&&b-t>=15){
+                Bitmap region=Bitmap.createBitmap(current,l,t,r-l,b-t);
+                Bitmap scaled=Bitmap.createScaledBitmap(region,512,512,true);
+                String positive=encode(scaled);
+                region.recycle();scaled.recycle();
+                String prior=referencesFor(learnedName);
+                JSONArray photos=new JSONArray(prior==null?"[]":prior);
+                // Do not accumulate unbounded photos in preferences.
+                JSONArray updated=new JSONArray();
+                int start=Math.max(0,photos.length()-29);
+                for(int i=start;i<photos.length();i++)updated.put(photos.getString(i));
+                updated.put(positive);
+                prefs.edit().putString(savedKey(learnedName),updated.toString()).apply();
+            }
+        }catch(Exception e){android.util.Log.w("PlainSight","Could not save confirmation",e);}
+        guessSnapshot=null;
+        clearCandidates(false);
+        holdMatch(current,target,"YOU CONFIRMED "+learnedName+" · added this view to its memory");
     }
     private void makeTeach(){
         teachPanel=new LinearLayout(this);teachPanel.setOrientation(LinearLayout.VERTICAL);
@@ -410,6 +537,7 @@ public final class MainActivity extends ComponentActivity {
     private void reset(){
         followSerial++;followActive=false;followRegion=null;
         token++;searching=false;overlay.clear();
+        clearCandidates(true);
         restoreCameraView();releaseLastFrame();
         if(focusLock!=null)focusLock.clear();if(zoom!=null)zoom.setVisibility(View.GONE);
         if(searchButton!=null){searchButton.setText("FIND");searchButton.setEnabled(true);}
@@ -456,13 +584,17 @@ public final class MainActivity extends ComponentActivity {
         worker.execute(()->{
             try {
                 final long begin=android.os.SystemClock.elapsedRealtime();
-                HybridFinder.Match found=HybridFinder.locate(live,requested,saved,localObjects,personalMatcher);
+                HybridFinder.Match found=HybridFinder.locate(live,requested,saved,localObjects,personalMatcher,localDino);
                 long ms=android.os.SystemClock.elapsedRealtime()-begin;
                 ui.post(()->{
                     if(job!=token||!searching){live.recycle();return;}
                     if(found!=null){
-                        holdMatch(live,found.region,"POSSIBLE "+found.label+
-                            " · "+found.evidence+" · "+ms+" ms");
+                        if(!found.verified){
+                            showCandidates(live,found,requested);
+                        }else{
+                            holdMatch(live,found.region,"MATCH "+found.label+
+                                " · "+found.evidence+" · "+ms+" ms");
+                        }
                     }else{
                         live.recycle();
                         if(++misses<3){
@@ -767,6 +899,7 @@ public final class MainActivity extends ComponentActivity {
         if(motionTracker!=null)motionTracker.close();
         if(localOcr!=null)localOcr.close();
         if(localObjects!=null)try{localObjects.close();}catch(Exception ignored){}
+        if(localDino!=null)try{localDino.close();}catch(Exception ignored){}
         super.onDestroy();
     }
     private final class Overlay extends View {
