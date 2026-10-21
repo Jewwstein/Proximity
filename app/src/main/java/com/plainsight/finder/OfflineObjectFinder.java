@@ -75,10 +75,10 @@ public final class OfflineObjectFinder implements AutoCloseable {
         return ids;
     }
     private static float clamp(float x){return Math.min(1,Math.max(0,x));}
-    private Match parse(float[][][] arr,List<Integer> wanted) {
+    private Match parse(float[][][] arr,List<Integer> wanted,String requested) {
         if(arr==null||arr.length==0)return null;
         float[][] data=arr[0];if(data.length==0)return null;
-        float max=.25f;Match best=null;
+        float max=requested.toLowerCase(Locale.ROOT).contains("straw")?.065f:.16f;Match best=null;
         // YOLO26 NMS-free format [1,300,38]: [x1,y1,x2,y2,score,class] + mask info.
         if(data[0].length>=6&&data[0].length<=64&&data.length>=10){
             for(float[] row:data){
@@ -132,7 +132,7 @@ public final class OfflineObjectFinder implements AutoCloseable {
             OrtSession.Result result=session.run(Collections.singletonMap(inputName,input))){
             Object out=result.get(0).getValue();
             if(!(out instanceof float[][][]))throw new IllegalStateException("Unexpected detector output tensor");
-            Match best=parse((float[][][])out,wanted);
+            Match best=parse((float[][][])out,wanted,query);
             android.util.Log.i("PlainSight","YOLOE inference "+(android.os.SystemClock.elapsedRealtime()-start)+"ms target="+query+" found="+(best!=null));
             return best;
         }
