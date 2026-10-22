@@ -1,437 +1,282 @@
 package com.echosight.app;
 
 import android.Manifest;
-import android.content.Context;
+import android.app.Activity;
 import android.content.pm.PackageManager;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.opengl.GLSurfaceView;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
-import android.util.Range;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.SeekBar;
 import android.widget.TextView;
-
-import androidx.activity.ComponentActivity;
-import androidx.camera.core.Camera;
-import androidx.camera.core.CameraSelector;
-import androidx.camera.core.Preview;
-import androidx.camera.lifecycle.ProcessCameraProvider;
-import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
-
-import com.google.common.util.concurrent.ListenableFuture;
-
-import android.graphics.Bitmap;
+import com.google.ar.core.ArCoreApk;
+import com.google.ar.core.Config;
+import com.google.ar.core.Session;
 import java.util.Locale;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * EchoSight: actual low-light camera photons + exploratory one-mic echogram.
+ * EchoSight 0.3: lit ARCore scan and orientation-only dark spatial memory.
  *
- * No real 3D geometry is claimed; a single channel of acoustic reflection does
- * not contain reliable azimuth. DO NOT USE FOR NAVIGATION OR COLLISION AVOIDANCE.
+ * Critical: darkness means no live position localization. The saved map is
+ * a visualization from a FROZEN viewpoint. Never use for walking/navigation.
  */
-public final class MainActivity extends ComponentActivity {
-    private static final int CAMERA_REQUEST=27, AUDIO_REQUEST=28;
-    private static final int CYAN=0xff78e9f9, TEXT=0xffedfaff, DEEP=0xff04101b;
-    private final Handler ui=new Handler(Looper.getMainLooper());
-    private final ExecutorService videoWorker=Executors.newSingleThreadExecutor();
-    private final AtomicBoolean videoBusy=new AtomicBoolean(false);
-    private final EchoAudio sonar=new EchoAudio();
-    private PreviewView preview;
-    private ImageView enhancedImage;
-    private TextView cameraState,sonarState,mainMessage;
-    private Button soundToggle,modeToggle,torchToggle,frequencyToggle;
-    private SonarOverlay graphic;
-    private Camera boundCamera;
-    private android.graphics.Bitmap latestRendered;
-    private int mode=VisualPipeline.FUSION;
-    private float gain=1.20f;
-    private boolean torchOn=false,active=true;
-    private boolean requestSoundAfterPermission=false;
-    private int previousDarkCounter=0,missingCameraFrames=0;
-    private final Runnable cameraLoop=new Runnable() {
-        @Override public void run(){
-            if(!active)return;
-            captureAndEnhance();
-            graphic.invalidate();
-            ui.postDelayed(this,155);
-        }
-    };
-
-    private int dp(float x){return Math.round(x*getResources().getDisplayMetrics().density);}
-    private GradientDrawable rounded(int background,int radius){
-        GradientDrawable d=new GradientDrawable();
-        d.setColor(background);d.setCornerRadius(dp(radius));return d;
-    }
-    private TextView text(String label,int size,int color,boolean bold){
-        TextView v=new TextView(this);
-        v.setText(label);v.setTextColor(color);v.setTextSize(size);
-        v.setGravity(Gravity.CENTER_VERTICAL);
-        if(bold)v.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
-        return v;
-    }
-    private Button button(String label){
-        Button v=new Button(this);v.setAllCaps(false);v.setText(label);
-        v.setTextSize(14);v.setTextColor(CYAN);
-        v.setBackground(rounded(0xe9213647,14));
-        return v;
-    }
-
+public final class MainActivity extends Activity {
+    private static final int CAMERA_REQUEST=41;
+    private static final int CYAN=0xff7de8f8,WHITE=0xffe9f8ff,INK=0xff03111c;
+    private GLSurfaceView surface;
+    private ScanRenderer renderer;
+    private MemoryView memoryView;
+    private SpatialMap map;
+    private TextView status,detail,warning,title;
+    private Button scanButton,saveButton,darkButton,deleteButton;
+    private Session session;
+    private boolean installRequested=false,scanning=false;
+    private float lastTouchX,lastTouchY;
+    private int frameMessages=0;
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
-        getWindow().setStatusBarColor(DEEP);
-        getWindow().setNavigationBarColor(DEEP);
+        getWindow().setStatusBarColor(INK);
+        getWindow().setNavigationBarColor(INK);
         getWindow().getDecorView().setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE|
-            View.SYSTEM_UI_FLAG_FULLSCREEN);
-        assembleScreen();
-        if(ContextCompat.checkSelfPermission(this,Manifest.permission.CAMERA)
-            !=PackageManager.PERMISSION_GRANTED)
-            requestPermissions(new String[]{Manifest.permission.CAMERA},CAMERA_REQUEST);
-        else openCamera();
+            View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        map=new SpatialMap(this);
+        map.load();
+        createUI();
+        showMemoryIfPresent();
     }
-
-    private void assembleScreen(){
+    private int dp(float x){return Math.round(x*getResources().getDisplayMetrics().density);}
+    private GradientDrawable rounded(int bg){
+        GradientDrawable d=new GradientDrawable();d.setColor(bg);d.setCornerRadius(dp(12));return d;
+    }
+    private TextView label(String string,int size,int color,boolean heavy){
+        TextView v=new TextView(this);v.setText(string);
+        v.setTextColor(color);v.setTextSize(size);v.setGravity(Gravity.CENTER_VERTICAL);
+        if(heavy)v.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        return v;
+    }
+    private Button button(String text){
+        Button b=new Button(this);b.setAllCaps(false);b.setText(text);
+        b.setTextColor(CYAN);b.setTextSize(13);b.setBackground(rounded(0xf5204255));
+        return b;
+    }
+    private void createUI(){
         FrameLayout root=new FrameLayout(this);
-        root.setBackgroundColor(DEEP);setContentView(root);
-        preview=new PreviewView(this);
-        preview.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
-        preview.setScaleType(PreviewView.ScaleType.FILL_CENTER);
-        root.addView(preview,new FrameLayout.LayoutParams(-1,-1));
+        root.setBackgroundColor(INK);setContentView(root);
+        surface=new GLSurfaceView(this);
+        surface.setEGLContextClientVersion(2);
+        renderer=new ScanRenderer(map,(count,frames,tracking,message)->runOnUiThread(()->{
+            if(!scanning)return;
+            if(frameMessages++%2==0){
+                status.setText(tracking?"SCANNING · "+count+" 3D points":"TRACKING UNAVAILABLE");
+                detail.setText(message+(tracking?" · move slowly through the lit room":" · add light or texture"));
+            }
+        }));
+        surface.setRenderer(renderer);
+        surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+        root.addView(surface,new FrameLayout.LayoutParams(-1,-1));
+        surface.setVisibility(View.GONE);
 
-        enhancedImage=new ImageView(this);
-        enhancedImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        enhancedImage.setBackgroundColor(DEEP);
-        root.addView(enhancedImage,new FrameLayout.LayoutParams(-1,-1));
-        enhancedImage.setVisibility(View.GONE);
+        memoryView=new MemoryView(this);
+        root.addView(memoryView,new FrameLayout.LayoutParams(-1,-1));
+        memoryView.setOnTouchListener((view,e)->{
+            if(!view.isShown())return false;
+            if(e.getActionMasked()==MotionEvent.ACTION_DOWN){
+                lastTouchX=e.getX();lastTouchY=e.getY();return true;
+            }
+            if(e.getActionMasked()==MotionEvent.ACTION_MOVE){
+                float dx=e.getX()-lastTouchX,dy=e.getY()-lastTouchY;
+                lastTouchX=e.getX();lastTouchY=e.getY();
+                memoryView.turnVirtual(-dx,dy);
+                return true;
+            }
+            return e.getActionMasked()==MotionEvent.ACTION_UP;
+        });
 
-        graphic=new SonarOverlay();
-        root.addView(graphic,new FrameLayout.LayoutParams(-1,-1));
-
-        LinearLayout header=new LinearLayout(this);
-        header.setOrientation(LinearLayout.VERTICAL);
-        header.setPadding(dp(20),dp(32),dp(16),dp(10));
-        header.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-            new int[]{0xf604101b,0xd604101b,0x8004101b,0x0004101b}));
-        root.addView(header,new FrameLayout.LayoutParams(-1,dp(180),Gravity.TOP));
-        TextView brand=text("E C H O S I G H T",22,CYAN,true);
-        header.addView(brand,new LinearLayout.LayoutParams(-1,dp(40)));
-        mainMessage=text("A visual sonar experiment · camera contours + sound echoes",13,TEXT,false);
-        mainMessage.setMaxLines(2);
-        header.addView(mainMessage,new LinearLayout.LayoutParams(-1,dp(48)));
-        cameraState=text("CAMERA · starting",12,0xffc8e9ee,false);
-        header.addView(cameraState,new LinearLayout.LayoutParams(-1,dp(24)));
-        sonarState=text("SONAR · off (enable below)",12,0xff9dd5e0,false);
-        sonarState.setMaxLines(2);
-        header.addView(sonarState,new LinearLayout.LayoutParams(-1,dp(38)));
+        LinearLayout top=new LinearLayout(this);
+        top.setOrientation(LinearLayout.VERTICAL);
+        top.setPadding(dp(15),dp(28),dp(15),dp(14));
+        top.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[]{0xf503111c,0xdf03111c,0x0003111c}));
+        root.addView(top,new FrameLayout.LayoutParams(-1,dp(197),Gravity.TOP));
+        title=label("ECHOSIGHT / SPATIAL MEMORY",20,CYAN,true);
+        top.addView(title,new LinearLayout.LayoutParams(-1,dp(38)));
+        status=label("SAVED MAP • "+map.count()+" points",15,WHITE,true);
+        top.addView(status,new LinearLayout.LayoutParams(-1,dp(33)));
+        detail=label("Scan your room in light, then review the stored 3D dots in the dark.",12,WHITE,false);
+        detail.setMaxLines(3);
+        top.addView(detail,new LinearLayout.LayoutParams(-1,dp(57)));
+        warning=label("EXPERIMENT · NO LIVE POSITION TRACKING IN DARKNESS",11,0xffffc1a4,true);
+        warning.setMaxLines(2);
+        top.addView(warning,new LinearLayout.LayoutParams(-1,dp(32)));
 
         LinearLayout controls=new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
-        controls.setPadding(dp(12),dp(18),dp(12),dp(19));
+        controls.setPadding(dp(10),dp(16),dp(10),dp(21));
         controls.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-            new int[]{0xff04101b,0xff04101b,0xed04101b,0x0004101b}));
-        root.addView(controls,new FrameLayout.LayoutParams(-1,dp(211),Gravity.BOTTOM));
-
-        LinearLayout buttons=new LinearLayout(this);
-        buttons.setGravity(Gravity.CENTER_VERTICAL);
-        controls.addView(buttons,new LinearLayout.LayoutParams(-1,dp(56)));
-        soundToggle=button("START SONAR");
-        buttons.addView(soundToggle,new LinearLayout.LayoutParams(0,dp(50),1.2f));
-        soundToggle.setOnClickListener(v->toggleSonar());
-        modeToggle=button("FUSION");
-        LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(0,dp(50),1);
-        mp.leftMargin=dp(7);buttons.addView(modeToggle,mp);
-        modeToggle.setOnClickListener(v->cycleMode());
-        torchToggle=button("LAMP OFF");
-        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(50),1);
-        lp.leftMargin=dp(7);buttons.addView(torchToggle,lp);
-        torchToggle.setOnClickListener(v->toggleTorch());
-
-        LinearLayout gainRow=new LinearLayout(this);
-        gainRow.setGravity(Gravity.CENTER_VERTICAL);
-        gainRow.addView(text("GLOW",12,CYAN,true),
-            new LinearLayout.LayoutParams(dp(53),dp(39)));
-        SeekBar brightness=new SeekBar(this);
-        brightness.setMax(100);brightness.setProgress(28);
-        LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(0,dp(45),1);
-        gainRow.addView(brightness,sp);
-        brightness.setProgressTintList(android.content.res.ColorStateList.valueOf(CYAN));
-        brightness.setThumbTintList(android.content.res.ColorStateList.valueOf(CYAN));
-        brightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-            @Override public void onProgressChanged(SeekBar v,int value,boolean fromUser){
-                gain=.8f+2.15f*(value/100f);
-            }
-            @Override public void onStartTrackingTouch(SeekBar v){}
-            @Override public void onStopTrackingTouch(SeekBar v){}
+            new int[]{0xff03111c,0xee03111c,0x0003111c}));
+        root.addView(controls,new FrameLayout.LayoutParams(-1,dp(189),Gravity.BOTTOM));
+        LinearLayout first=new LinearLayout(this);
+        first.setGravity(Gravity.CENTER_VERTICAL);
+        controls.addView(first,new LinearLayout.LayoutParams(-1,dp(53)));
+        scanButton=button("SCAN IN LIGHT");
+        first.addView(scanButton,new LinearLayout.LayoutParams(0,dp(47),1));
+        scanButton.setOnClickListener(v->startScan());
+        saveButton=button("SAVE MAP");
+        LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(0,dp(47),.75f);sp.leftMargin=dp(7);
+        first.addView(saveButton,sp);
+        saveButton.setOnClickListener(v->saveMap());
+        LinearLayout second=new LinearLayout(this);
+        second.setGravity(Gravity.CENTER_VERTICAL);
+        controls.addView(second,new LinearLayout.LayoutParams(-1,dp(53)));
+        darkButton=button("DARK MEMORY");
+        second.addView(darkButton,new LinearLayout.LayoutParams(0,dp(47),1));
+        darkButton.setOnClickListener(v->openMemory());
+        deleteButton=button("CLEAR MAP");
+        LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,dp(47),.75f);cp.leftMargin=dp(7);
+        second.addView(deleteButton,cp);
+        deleteButton.setOnClickListener(v->{
+            if(scanning)stopScan();
+            map.delete();
+            memoryView.deactivate();memoryView.setVisibility(View.VISIBLE);memoryView.activate(map);
+            status.setText("MAP CLEARED");
+            detail.setText("Scan a lit room to record actual 3D points.");
         });
-        frequencyToggle=button("PING: HIGH");
-        LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(dp(116),dp(44));
-        fp.leftMargin=dp(6);
-        gainRow.addView(frequencyToggle,fp);
-        frequencyToggle.setOnClickListener(v->{
-            boolean enable=!sonar.isAudibleFallback();
-            if(sonar.isRunning())sonar.stop();
-            sonar.setAudibleFallback(enable);
-            frequencyToggle.setText(enable?"PING: AUDIBLE":"PING: HIGH");
-            sonarState.setText(enable
-                ?"Lower 9–12 kHz chirps may be audible. Press START SONAR."
-                :"High 14.5–16.9 kHz chirps selected. Press START SONAR.");
-            soundToggle.setText("START SONAR");
-            graphic.setActive(false);
-        });
-        controls.addView(gainRow,new LinearLayout.LayoutParams(-1,dp(48)));
-
-        TextView footnote=text("EXPLORE ONLY · NOT SAFE FOR WALKING OR OBSTACLE AVOIDANCE\n"+
-            "Audio estimates range, NOT direction. No map without reliable echoes.",11,0xffd1b9b1,false);
-        footnote.setGravity(Gravity.CENTER);
-        controls.addView(footnote,new LinearLayout.LayoutParams(-1,dp(56)));
+        TextView caution=label(
+            "Saved view follows your TURNING only; walking is NOT tracked. "+
+            "Do not use this app to navigate or avoid hazards in the dark.",
+            11,0xffffc0a7,false);
+        caution.setGravity(Gravity.CENTER);caution.setMaxLines(3);
+        controls.addView(caution,new LinearLayout.LayoutParams(-1,dp(54)));
     }
-
-    private void openCamera(){
-        ListenableFuture<ProcessCameraProvider> future=ProcessCameraProvider.getInstance(this);
-        future.addListener(()->{
-            try{
-                ProcessCameraProvider provider=future.get();
-                provider.unbindAll();
-                Preview video=new Preview.Builder().build();
-                video.setSurfaceProvider(preview.getSurfaceProvider());
-                boundCamera=provider.bindToLifecycle(this,
-                    CameraSelector.DEFAULT_BACK_CAMERA,video);
-                try {
-                    Range<Integer> limits=boundCamera.getCameraInfo()
-                        .getExposureState().getExposureCompensationRange();
-                    int positive=Math.max(0,limits.getUpper());
-                    if(positive>0)boundCamera.getCameraControl()
-                        .setExposureCompensationIndex(Math.max(1,positive/2));
-                }catch(Exception ignored){}
-                cameraState.setText("CAMERA · live · enhancing available light");
-            }catch(Exception e){
-                cameraState.setText("CAMERA FAILED · "+e.getMessage());
-            }
-        }, ContextCompat.getMainExecutor(this));
-    }
-
-    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] grants){
-        super.onRequestPermissionsResult(request,permissions,grants);
-        if(request==CAMERA_REQUEST){
-            if(grants.length>0&&grants[0]==PackageManager.PERMISSION_GRANTED)openCamera();
-            else cameraState.setText("Camera permission required for image contours");
-        }
-        if(request==AUDIO_REQUEST){
-            if(grants.length>0&&grants[0]==PackageManager.PERMISSION_GRANTED &&
-                requestSoundAfterPermission){
-                requestSoundAfterPermission=false;
-                startSonar();
-            }else{
-                requestSoundAfterPermission=false;
-                sonarState.setText("SONAR · permission denied; camera mode still works");
-            }
+    private void showMemoryIfPresent(){
+        surface.setVisibility(View.GONE);
+        memoryView.setVisibility(View.VISIBLE);
+        if(map.count()>0){
+            memoryView.activate(map);
+            status.setText(map.count()+" stored 3D points");
+            detail.setText("Saved perspective, NOT your current location. Turn to explore or swipe to rotate virtually.");
+        }else{
+            memoryView.activate(map);
+            status.setText("NO 3D MAP YET");
+            detail.setText("Tap SCAN IN LIGHT, move slowly through your room, then SAVE MAP.");
         }
     }
-
-    private void captureAndEnhance(){
-        if(videoBusy.get())return;
-        Bitmap snapshot=preview.getBitmap();
-        if(snapshot==null||snapshot.getWidth()<100){
-            if(++missingCameraFrames==20){
-                cameraState.setText("Camera frame unavailable — showing raw camera. Restart if needed.");
-                enhancedImage.setVisibility(View.GONE);
-            }
-            return;
+    private boolean cameraAllowed(){
+        if(ContextCompat.checkSelfPermission(this,Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED){
+            requestPermissions(new String[]{Manifest.permission.CAMERA},CAMERA_REQUEST);
+            return false;
         }
-        missingCameraFrames=0;
-        if(!videoBusy.compareAndSet(false,true)){snapshot.recycle();return;}
-        final int videoMode=mode;final float chosenGain=gain;
-        videoWorker.execute(()->{
-            try{
-                VisualPipeline.Frame result=VisualPipeline.render(snapshot,videoMode,chosenGain);
-                ui.post(()->{
-                    if(!active){result.bitmap.recycle();return;}
-                    Bitmap oldFrame=latestRendered;
-                    enhancedImage.setImageBitmap(result.bitmap);
-                    enhancedImage.setVisibility(View.VISIBLE);
-                    latestRendered=result.bitmap;
-                    if(oldFrame!=null && !oldFrame.isRecycled())
-                        ui.postDelayed(()->{if(!oldFrame.isRecycled())oldFrame.recycle();},550);
-                    if(result.insufficientLight) {
-                        if(++previousDarkCounter>=3){
-                            cameraState.setText("CAMERA · no usable light · sonar-only contours unavailable");
-                        }
-                        graphic.setCameraDark(true);
-                    }else{
-                        previousDarkCounter=0;
-                        cameraState.setText("CAMERA · light boosted · "+
-                            result.edgePixels+" real contours");
-                        graphic.setCameraDark(false);
-                    }
-                });
-            }catch(Throwable e){
-                ui.post(()->cameraState.setText("Camera enhancement error: "+e.getMessage()));
-            }finally{
-                snapshot.recycle();
-                videoBusy.set(false);
-            }
-        });
+        return true;
     }
-
-    private void toggleSonar(){
-        if(sonar.isRunning()){
-            sonar.stop();
-            graphic.setActive(false);
-            sonarState.setText("SONAR · off");
-            soundToggle.setText("START SONAR");
-            return;
-        }
-        if(ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)
-           !=PackageManager.PERMISSION_GRANTED){
-            requestSoundAfterPermission=true;
-            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},AUDIO_REQUEST);
-            return;
-        }
-        startSonar();
-    }
-    private void startSonar(){
-        sonarState.setText("SONAR · checking speaker/microphone reflections…");
-        soundToggle.setText("STOP SONAR");
-        graphic.setActive(true);
-        sonar.start(reading->ui.post(()->{
-            if(!active)return;
-            graphic.setReading(reading);
-            sonarState.setText("SONAR · "+reading.message);
-            if(!sonar.isRunning()){
-                soundToggle.setText("START SONAR");
-                graphic.setActive(false);
-            }
-        }));
-    }
-    private void cycleMode(){
-        mode=(mode+1)%3;
-        modeToggle.setText(mode==VisualPipeline.FUSION?"FUSION":
-            mode==VisualPipeline.EDGES?"OUTLINES":"ENHANCED");
-        mainMessage.setText(mode==VisualPipeline.FUSION
-            ?"Fusion · enhanced camera pixels + real cyan edges"
-            :mode==VisualPipeline.EDGES
-                ?"Outlines · actual camera edges; echo rings do not have direction"
-                :"Enhanced · amplifying only light the camera receives");
-    }
-    private void toggleTorch(){
-        if(boundCamera==null || !boundCamera.getCameraInfo().hasFlashUnit()){
-            cameraState.setText("Torch unavailable on this camera");return;
-        }
-        torchOn=!torchOn;
+    private void startScan(){
+        if(!cameraAllowed())return;
         try{
-            boundCamera.getCameraControl().enableTorch(torchOn);
-            torchToggle.setText(torchOn?"LAMP ON":"LAMP OFF");
-        }catch(Exception e){torchOn=false;torchToggle.setText("LAMP OFF");}
+            ArCoreApk.Availability availability=ArCoreApk.getInstance().checkAvailability(this);
+            if(availability.isUnsupported()){
+                status.setText("ARCORE NOT SUPPORTED");
+                detail.setText("This phone cannot run Google ARCore room scanning. Saved viewer still works.");
+                return;
+            }
+            ArCoreApk.InstallStatus installed=ArCoreApk.getInstance()
+                .requestInstall(this,!installRequested);
+            if(installed==ArCoreApk.InstallStatus.INSTALL_REQUESTED){
+                installRequested=true;
+                status.setText("INSTALL GOOGLE PLAY SERVICES FOR AR");
+                detail.setText("Install or update AR service, then return to EchoSight.");
+                return;
+            }
+            if(session==null){
+                session=new Session(this);
+                Config config=session.getConfig();
+                boolean depth=session.isDepthModeSupported(Config.DepthMode.AUTOMATIC);
+                if(depth)config.setDepthMode(Config.DepthMode.AUTOMATIC);
+                session.configure(config);
+                renderer.setSession(session,depth);
+                detail.setText(depth?"ARCore Depth API available":"ARCore tracking available; Depth API not available");
+            }
+            if(scanning)return;
+            memoryView.deactivate();memoryView.setVisibility(View.GONE);
+            surface.setVisibility(View.VISIBLE);
+            session.resume();
+            surface.onResume();
+            renderer.setRotation(getWindowManager().getDefaultDisplay().getRotation());
+            renderer.setRecording(true);
+            scanning=true;
+            scanButton.setText("SCANNING…");
+            status.setText("SCANNING LIT ROOM");
+            detail.setText("Sweep slowly across walls, floor, bed and furniture. Use good lighting.");
+            warning.setText("LIVE CAMERA SCAN · SAVE WHEN FINISHED");
+        }catch(Throwable error){
+            status.setText("ARCORE SCAN CANNOT START");
+            detail.setText(error.getClass().getSimpleName()+": "+error.getMessage());
+        }
     }
-
+    private void stopScan(){
+        if(!scanning)return;
+        scanning=false;
+        renderer.setRecording(false);
+        try{surface.onPause();}catch(Throwable ignored){}
+        try{if(session!=null)session.pause();}catch(Throwable ignored){}
+        surface.setVisibility(View.GONE);
+        scanButton.setText("SCAN IN LIGHT");
+    }
+    private void saveMap(){
+        if(map.count()<35){
+            status.setText("NOT ENOUGH 3D POINTS");
+            detail.setText("Scan a well-lit textured space and collect more points first.");
+            return;
+        }
+        boolean saved=map.save();
+        status.setText(saved?"3D ROOM MEMORY SAVED":"COULD NOT SAVE MAP");
+        detail.setText(saved?map.count()+" world points stored locally. Open DARK MEMORY to view.":
+            "Map unavailable or storage error.");
+    }
+    private void openMemory(){
+        if(scanning)stopScan();
+        if(map.count()<35 && map.exists())map.load();
+        memoryView.setVisibility(View.VISIBLE);
+        memoryView.activate(map);
+        warning.setText("POSITION FROZEN · DO NOT WALK USING THIS MAP");
+        status.setText(map.count()+" SAVED POINTS · MEMORY VIEW");
+        detail.setText("Phone orientation rotates the saved view. Your footsteps cannot be tracked here.");
+        if(map.count()<35)status.setText("NO USABLE 3D MAP — SCAN FIRST");
+    }
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] result){
+        super.onRequestPermissionsResult(request,permissions,result);
+        if(request==CAMERA_REQUEST && result.length>0 &&result[0]==PackageManager.PERMISSION_GRANTED)
+            startScan();
+    }
     @Override protected void onResume(){
         super.onResume();
-        active=true;
-        ui.removeCallbacks(cameraLoop);
-        ui.postDelayed(cameraLoop,250);
+        if(scanning&&session!=null){
+            try{session.resume();surface.onResume();}
+            catch(Throwable e){status.setText("ARCore resume failed: "+e.getMessage());}
+        }else if(memoryView!=null&&memoryView.getVisibility()==View.VISIBLE){
+            memoryView.activate(map);
+        }
     }
     @Override protected void onPause(){
-        active=false;
-        sonar.stop();
-        if(soundToggle!=null)soundToggle.setText("START SONAR");
-        if(graphic!=null)graphic.setActive(false);
+        if(scanning){
+            renderer.setRecording(false);
+            try{surface.onPause();}catch(Throwable ignored){}
+            try{if(session!=null)session.pause();}catch(Throwable ignored){}
+            scanning=false;scanButton.setText("SCAN IN LIGHT");
+        }
+        if(memoryView!=null)memoryView.deactivate();
         super.onPause();
     }
     @Override protected void onDestroy(){
-        active=false;
-        sonar.stop();
-        ui.removeCallbacks(cameraLoop);
-        videoWorker.shutdownNow();
-        if(latestRendered!=null && !latestRendered.isRecycled()) latestRendered.recycle();
-        if(boundCamera!=null && torchOn)boundCamera.getCameraControl().enableTorch(false);
+        stopScan();
+        if(session!=null)try{session.close();}catch(Throwable ignored){}
+        if(memoryView!=null)memoryView.deactivate();
         super.onDestroy();
-    }
-
-    private final class SonarOverlay extends View {
-        private final Paint pen=new Paint(3);
-        private float[] readings=new float[12];
-        private float approximateRange=0,quality=0;
-        private boolean sonarActive=false,cameraDark=false,hasEcho=false;
-        SonarOverlay(){super(MainActivity.this);}
-        void setActive(boolean active){sonarActive=active;invalidate();}
-        void setCameraDark(boolean dark){cameraDark=dark;invalidate();}
-        void setReading(EchoAudio.Reading r){
-            readings=r.bands.clone();
-            approximateRange=r.distanceMeters;quality=r.strength;
-            hasEcho=r.calibrated && r.distanceMeters>0 && r.strength>=.47f;
-            invalidate();
-        }
-        @Override protected void onDraw(Canvas canvas){
-            super.onDraw(canvas);
-            int w=getWidth(),h=getHeight();
-            if(w==0||h==0)return;
-            float cx=w*.5f,cy=h*.51f;
-            if(sonarActive) {
-                // Echo circles deliberately carry NO azimuth/bearing claim.
-                pen.setStyle(Paint.Style.STROKE);
-                for(int i=1;i<=4;i++){
-                    float radius=dp(23)+i*dp(47);
-                    int alpha=hasEcho?(i==Math.min(4,Math.max(1,(int)(approximateRange/.90f)))?140:35):25;
-                    pen.setColor(Color.argb(alpha,88,230,250));
-                    pen.setStrokeWidth(dp(i==3?2:1));
-                    canvas.drawCircle(cx,cy,radius,pen);
-                }
-                pen.setStyle(Paint.Style.FILL);
-                pen.setColor(0xffa9f3ff);pen.setTextSize(dp(12));
-                pen.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));
-                String caption=hasEcho
-                    ?String.format(Locale.US,"POSSIBLE ECHO ~%.1f m · NO BEARING",approximateRange)
-                    :"ECHO SCAN · RANGE ONLY";
-                float px=pen.measureText(caption);
-                canvas.drawText(caption,Math.max(dp(10),(w-px)/2f),
-                    h-dp(240),pen);
-                float barBase=h-dp(251),maxHeight=dp(43);
-                for(int i=0;i<readings.length;i++){
-                    float l=dp(14)+i*((w-dp(28))/12f);
-                    float intensity=Math.min(1f,Math.max(0,readings[i]));
-                    pen.setColor(Color.argb(80+(int)(175*intensity),65,219,237));
-                    canvas.drawRoundRect(l,barBase-maxHeight*intensity,
-                        l+Math.max(dp(3),(w-dp(28))/12f-dp(4)),
-                        barBase,dp(2),dp(2),pen);
-                }
-                pen.setColor(0xffaddce4);pen.setTextSize(dp(10));
-                pen.setTypeface(Typeface.DEFAULT);
-                canvas.drawText("0.35 m",dp(15),barBase+dp(15),pen);
-                canvas.drawText("~3.3 m",w-dp(59),barBase+dp(15),pen);
-            }
-            if(cameraDark) {
-                pen.setColor(0xffa9d6e0);pen.setTypeface(Typeface.DEFAULT);
-                pen.setTextAlign(Paint.Align.CENTER);
-                pen.setTextSize(dp(14));
-                canvas.drawText("NO CAMERA LIGHT · NO REAL VISUAL EDGES",
-                    cx,h*.38f,pen);
-                pen.setTextAlign(Paint.Align.LEFT);
-            }
-            // Fixed center reticle indicates phone direction, not sonar bearing.
-            pen.setStyle(Paint.Style.STROKE);
-            pen.setStrokeWidth(dp(1.4f));
-            pen.setColor(0x6580eeff);
-            canvas.drawLine(cx-dp(12),cy,cx-dp(4),cy,pen);
-            canvas.drawLine(cx+dp(4),cy,cx+dp(12),cy,pen);
-            canvas.drawLine(cx,cy-dp(12),cx,cy-dp(4),pen);
-            canvas.drawLine(cx,cy+dp(4),cx,cy+dp(12),pen);
-            pen.setStyle(Paint.Style.FILL);
-        }
     }
 }
