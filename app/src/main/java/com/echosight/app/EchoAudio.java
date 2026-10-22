@@ -143,7 +143,7 @@ public final class EchoAudio {
             while(running){
                 microphone.read(clear,0,clear.length,AudioRecord.READ_BLOCKING);
                 try{
-                    speaker.stop();
+                    if(speaker.getPlayState()==AudioTrack.PLAYSTATE_PLAYING)speaker.stop();
                     speaker.reloadStaticData();
                     speaker.setPlaybackHeadPosition(0);
                     speaker.play();

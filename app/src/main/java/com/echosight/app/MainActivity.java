@@ -104,7 +104,6 @@ public final class MainActivity extends ComponentActivity {
             !=PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.CAMERA},CAMERA_REQUEST);
         else openCamera();
-        ui.postDelayed(cameraLoop,350);
     }
 
     private void assembleScreen(){
@@ -240,8 +239,11 @@ public final class MainActivity extends ComponentActivity {
                 VisualPipeline.Frame result=VisualPipeline.render(snapshot,videoMode,chosenGain);
                 ui.post(()->{
                     if(!active){result.bitmap.recycle();return;}
+                    Bitmap oldFrame=latestRendered;
                     enhancedImage.setImageBitmap(result.bitmap);
                     latestRendered=result.bitmap;
+                    if(oldFrame!=null && !oldFrame.isRecycled())
+                        ui.postDelayed(()->{if(!oldFrame.isRecycled())oldFrame.recycle();},550);
                     if(result.insufficientLight) {
                         if(++previousDarkCounter>=3){
                             cameraState.setText("CAMERA · no usable light · sonar-only contours unavailable");
@@ -317,6 +319,8 @@ public final class MainActivity extends ComponentActivity {
     @Override protected void onResume(){
         super.onResume();
         active=true;
+        ui.removeCallbacks(cameraLoop);
+        ui.postDelayed(cameraLoop,250);
     }
     @Override protected void onPause(){
         active=false;
@@ -330,6 +334,7 @@ public final class MainActivity extends ComponentActivity {
         sonar.stop();
         ui.removeCallbacks(cameraLoop);
         videoWorker.shutdownNow();
+        if(latestRendered!=null && !latestRendered.isRecycled()) latestRendered.recycle();
         if(boundCamera!=null && torchOn)boundCamera.getCameraControl().enableTorch(false);
         super.onDestroy();
     }
