@@ -125,13 +125,14 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
                 if(frameCount%30==0)capturePlanes(s);
                 // Save real photographed keyframes. Store the matching tracked
                 // camera pose at exposure time, never generated imagery.
-                if(frameCount%12==0 && System.currentTimeMillis()-lastPhotoMillis>850){
-                    capturePhoto(camera.getDisplayOrientedPose(),width,frameHeight,lower);
-                }
                 if(frameCount%15==0)
                     listener.onScanFrame(map.count(),map.frames(),true,
                         photos.count()+" real photos saved in this AR scan");
             }
+            // Photo sampling runs independently of the sparser point-cloud
+            // sampling schedule (not only every 60th frame).
+            if(frameCount%12==0 && System.currentTimeMillis()-lastPhotoMillis>850)
+                capturePhoto(camera.getDisplayOrientedPose(),width,frameHeight,lower);
         }catch(Throwable e){
             if(frameCount%30==0)Log.w(TAG,"Scan frame unavailable",e);
             if(frameCount%50==0)
