@@ -1,15 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
-    <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <application
         android:allowBackup="false"
         android:label="EchoSight"
         android:icon="@android:drawable/ic_menu_view"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="false">
+        <meta-data android:name="com.google.ar.core" android:value="optional" />
         <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
