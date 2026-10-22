@@ -1,4 +1,4 @@
-# EchoSight v0.5.1 — Actual Photographic Room Memory
+# EchoSight v0.5.2 — Actual Photographic Room Memory
 
 This is a **different strategy** from the v0.4 dot-cloud/wireframe viewer.
 

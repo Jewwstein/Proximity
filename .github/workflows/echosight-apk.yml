@@ -26,12 +26,12 @@ jobs:
       - name: Publish build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EchoSight-v0.5.1-test-APK
+          name: EchoSight-v0.5.2-test-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
       - name: Publish public test release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk EchoSight-v0.5.1.apk
-          gh release create echo-sight-v0.5.1 EchoSight-v0.5.1.apk --target "$GITHUB_SHA" --title "EchoSight v0.5.1 experimental sonar + camera vision" --notes "EchoSight 0.5: photo-based spatial room memory. While light is on, capture real full-color camera frames with ARCore pose, up to 240 locally stored images. In memory mode show nearest actual recorded view selected by gyro and experimental step estimate. Not a real-time dark camera, 3D model, or safe navigation. Phone compatibility and behavior not physically tested." --prerelease || gh release upload echo-sight-v0.5.1 EchoSight-v0.5.1.apk --clobber
+          cp app/build/outputs/apk/debug/app-debug.apk EchoSight-v0.5.2.apk
+          gh release create echo-sight-v0.5.2 EchoSight-v0.5.2.apk --target "$GITHUB_SHA" --title "EchoSight v0.5.2 experimental sonar + camera vision" --notes "EchoSight 0.5: photo-based spatial room memory. While light is on, capture real full-color camera frames with ARCore pose, up to 240 locally stored images. In memory mode show nearest actual recorded view selected by gyro and experimental step estimate. Not a real-time dark camera, 3D model, or safe navigation. Phone compatibility and behavior not physically tested." --prerelease || gh release upload echo-sight-v0.5.2 EchoSight-v0.5.2.apk --clobber
