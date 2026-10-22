@@ -4,6 +4,12 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.widget.ImageView;
+import android.os.Handler;
+import android.os.Looper;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.opengl.GLSurfaceView;
@@ -34,6 +40,13 @@ public final class MainActivity extends Activity {
     private ScanRenderer renderer;
     private MemoryView memoryView;
     private SpatialMap map;
+    private PhotoAtlas photoAtlas;
+    private ImageView photoDisplay;
+    private final Handler ui=new Handler(Looper.getMainLooper());
+    private final ExecutorService decodeWorker=Executors.newSingleThreadExecutor();
+    private Bitmap displayedPhoto;
+    private int photoSerial=0,selectedPhoto=-1;
+    private long lastPhotoChange=0;
     private TextView status,detail,warning,title;
     private Button scanButton,saveButton,darkButton,deleteButton,walkButton,wideButton,styleButton,strideButton;
     private Session session;
@@ -51,6 +64,7 @@ public final class MainActivity extends Activity {
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
         map=new SpatialMap(this);
         map.load();
+        photoAtlas=new PhotoAtlas(this);
         createUI();
         showMemoryIfPresent();
     }
@@ -74,10 +88,10 @@ public final class MainActivity extends Activity {
         root.setBackgroundColor(INK);setContentView(root);
         surface=new GLSurfaceView(this);
         surface.setEGLContextClientVersion(2);
-        renderer=new ScanRenderer(map,(count,frames,tracking,message)->runOnUiThread(()->{
+        renderer=new ScanRenderer(map,photoAtlas,(count,frames,tracking,message)->runOnUiThread(()->{
             if(!scanning)return;
             if(frameMessages++%2==0){
-                status.setText(tracking?"SCANNING · "+count+" 3D points":"TRACKING UNAVAILABLE");
+                status.setText(tracking?"SCANNING · "+photoAtlas.count()+" ROOM PHOTOS":"TRACKING UNAVAILABLE");
                 detail.setText(message+(tracking?" · move slowly through the lit room":" · add light or texture"));
             }
         }));
@@ -86,7 +100,15 @@ public final class MainActivity extends Activity {
         root.addView(surface,new FrameLayout.LayoutParams(-1,-1));
         surface.setVisibility(View.GONE);
 
+        photoDisplay=new ImageView(this);
+        photoDisplay.setBackgroundColor(INK);
+        photoDisplay.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        root.addView(photoDisplay,new FrameLayout.LayoutParams(-1,-1));
+        photoDisplay.setVisibility(View.GONE);
+
         memoryView=new MemoryView(this);
+        memoryView.setViewUpdates((position,forward,steps,error)->
+            showRecordedView(position,forward,steps,error));
         memoryView.setStepUpdates((count,distance,error)->runOnUiThread(()->{
             if(walkButton==null)return;
             if(count>=24){
@@ -187,7 +209,8 @@ public final class MainActivity extends Activity {
         third.addView(deleteButton,cp);
         deleteButton.setOnClickListener(v->{
             if(scanning)stopScan();
-            map.delete();
+            map.delete();photoAtlas.reset();
+            memoryView.setPhotoMode(false);photoDisplay.setVisibility(View.GONE);
             memoryView.deactivate();memoryView.setVisibility(View.VISIBLE);memoryView.activate(map);
             status.setText("MAP CLEARED");
             detail.setText("Scan a lit room to record actual 3D points.");
@@ -203,11 +226,16 @@ public final class MainActivity extends Activity {
     private void showMemoryIfPresent(){
         surface.setVisibility(View.GONE);
         memoryView.setVisibility(View.VISIBLE);
-        if(map.count()>0){
+        if(map.count()>0 || photoAtlas.hasPhotos()){
+            photoDisplay.setVisibility(photoAtlas.hasPhotos()?View.VISIBLE:View.GONE);
+            memoryView.setPhotoMode(photoAtlas.hasPhotos());
             memoryView.activate(map);
-            status.setText(map.count()+" stored 3D points");
-            detail.setText("Saved perspective, NOT your current location. Turn to explore or swipe to rotate virtually.");
+            memoryView.updatePhoto();
+            status.setText(photoAtlas.count()+" recorded photos · "+map.count()+" points");
+            detail.setText("Actual recorded room views. Turning chooses matching frames; walking position is only estimated.");
         }else{
+            memoryView.setPhotoMode(false);
+            photoDisplay.setVisibility(View.GONE);
             memoryView.activate(map);
             status.setText("NO 3D MAP YET");
             detail.setText("Tap SCAN IN LIGHT, move slowly through your room, then SAVE MAP.");
@@ -238,6 +266,9 @@ public final class MainActivity extends Activity {
                 return;
             }
             if(session==null){
+                // Start a new photographic atlas in this AR coordinate space.
+                // Old photos and old geometry cannot share a new AR origin.
+                photoAtlas.reset();
                 // A new ARCore session has a new coordinate origin. Never merge
                 // an old saved map into newly acquired world coordinates.
                 if(map.count()>0){
@@ -255,6 +286,7 @@ public final class MainActivity extends Activity {
             }
             if(scanning)return;
             memoryView.deactivate();memoryView.setVisibility(View.GONE);
+            photoDisplay.setVisibility(View.GONE);
             surface.setVisibility(View.VISIBLE);
             session.resume();
             surface.onResume();
@@ -280,26 +312,75 @@ public final class MainActivity extends Activity {
         scanButton.setText("SCAN IN LIGHT");
     }
     private void saveMap(){
-        if(map.count()<35){
-            status.setText("NOT ENOUGH 3D POINTS");
+        if(photoAtlas.count()<3 && map.count()<35){
+            status.setText("NOT ENOUGH RECORDED IMAGES");
             detail.setText("Scan a well-lit textured space and collect more points first.");
             return;
         }
-        boolean saved=map.save();
+        boolean saved=map.count()>=35?map.save():photoAtlas.count()>=3;
+        photoAtlas.save();
         status.setText(saved?"3D ROOM MEMORY SAVED":"COULD NOT SAVE MAP");
-        detail.setText(saved?(map.count()+" 3D points and "+map.surfaceCount()+" measured depth edges saved. Open DARK MEMORY.") :
+        detail.setText(saved?(photoAtlas.count()+" actual photos recorded, plus "+map.surfaceCount()+" optional depth lines. Open DARK MEMORY.") :
             "Map unavailable or storage error.");
     }
     private void openMemory(){
         if(scanning)stopScan();
         if(map.count()<35 && map.exists())map.load();
+        photoAtlas.load();
+        boolean photos=photoAtlas.hasPhotos();
+        photoDisplay.setVisibility(photos?View.VISIBLE:View.GONE);
+        memoryView.setPhotoMode(photos);
         memoryView.setVisibility(View.VISIBLE);
         memoryView.activate(map);
+        memoryView.updatePhoto();
         warning.setText("POSITION FROZEN · DO NOT WALK USING THIS MAP");
-        status.setText(map.count()+" SAVED POINTS · "+map.surfaceCount()+" SURFACE LINES");
-        detail.setText("Saved start point. TRY STEPS uses estimated stride + phone heading only. Do not use it to navigate.");
+        status.setText(photoAtlas.count()+" RECORDED VIEWS · "+map.count()+" SPATIAL FEATURES");
+        detail.setText("Showing saved photos, NOT live video. Steps select approximate viewpoints; no free 3D movement.");
         walkButton.setText("TRY STEPS");
-        if(map.count()<35)status.setText("NO USABLE 3D MAP — SCAN FIRST");
+        if(map.count()<35 && photoAtlas.count()==0)status.setText("NO SAVED PHOTOS — SCAN FIRST");
+    }
+    private void showRecordedView(float[] position,float[] forward,int steps,float uncertainty){
+        if(photoDisplay==null||photoDisplay.getVisibility()!=View.VISIBLE)return;
+        // This chooses the closest PRE-RECORDED image, not a synthetic
+        // viewpoint. A mismatch displays no photo rather than a wrong hallway.
+        PhotoAtlas.Choice nearest=photoAtlas.choose(position,forward);
+        if(nearest==null){
+            selectedPhoto=-1;
+            photoSerial++;
+            photoDisplay.setImageDrawable(null);
+            detail.setText("No saved photo matches this estimated angle/location. Not a live view.");
+            return;
+        }
+        int selection=nearest.entry.number;
+        if(selection==selectedPhoto)return;
+        long now=System.currentTimeMillis();
+        if(now-lastPhotoChange<280)return;
+        selectedPhoto=selection;
+        lastPhotoChange=now;
+        int serial=++photoSerial;
+        decodeWorker.execute(()->{
+            Bitmap image=photoAtlas.image(nearest.entry);
+            ui.post(()->{
+                if(serial!=photoSerial || photoDisplay.getVisibility()!=View.VISIBLE){
+                    if(image!=null)image.recycle();
+                    return;
+                }
+                if(image==null){
+                    selectedPhoto=-1;
+                    return;
+                }
+                Bitmap old=displayedPhoto;
+                displayedPhoto=image;
+                photoDisplay.setImageBitmap(image);
+                if(old!=null&&!old.isRecycled())ui.postDelayed(()->{
+                    if(!old.isRecycled())old.recycle();
+                },400);
+                detail.setText(String.format(Locale.US,
+                    "Recorded frame %d/%d | match %.1f m / %.0f deg | NOT LIVE",
+                    nearest.entry.number+1,photoAtlas.count(),nearest.distance,
+                    Math.toDegrees(nearest.angle)));
+            });
+        });
     }
     private void toggleWalking(){
         if(scanning){
@@ -307,7 +388,7 @@ public final class MainActivity extends Activity {
             detail.setText("Step estimates only run from a saved mapped start point.");
             return;
         }
-        if(map.count()<35){status.setText("NO MAP FOR STEP TEST");return;}
+        if(map.count()<35 && photoAtlas.count()==0){status.setText("NO MAP FOR STEP TEST");return;}
         if(memoryView.isWalking()){
             memoryView.setWalking(false);
             walkButton.setText("RESUME STEPS");
@@ -368,6 +449,8 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onDestroy(){
         stopScan();
+        decodeWorker.shutdownNow();
+        if(displayedPhoto!=null&&!displayedPhoto.isRecycled())displayedPhoto.recycle();
         if(session!=null)try{session.close();}catch(Throwable ignored){}
         if(memoryView!=null)memoryView.deactivate();
         super.onDestroy();
