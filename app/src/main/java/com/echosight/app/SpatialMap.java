@@ -11,6 +11,7 @@ public final class SpatialMap {
     public static final int MAX_SEGMENTS=80000;
     private static final int FORMAT=2;
     private final ArrayList<float[]> edges=new ArrayList<>();
+    private final HashSet<Long> edgeKeys=new HashSet<>();
     private final ArrayList<float[]> locations=new ArrayList<>();
     private final HashSet<Long> voxels=new HashSet<>();
     private float[] location=new float[]{0f,0f,0f};
@@ -46,6 +47,10 @@ public final class SpatialMap {
         if(edges.size()>=MAX_SEGMENTS)return;
         float d=(x-xx)*(x-xx)+(y-yy)*(y-yy)+(z-zz)*(z-zz);
         if(d<.00015f || d>.11f) return;
+        long k1=hash(x,y,z),k2=hash(xx,yy,zz);
+        long lo=Math.min(k1,k2),hi=Math.max(k1,k2);
+        long edgeKey=lo*31L+hi;
+        if(!edgeKeys.add(edgeKey))return;
         if(!Float.isFinite(x)||!Float.isFinite(y)||!Float.isFinite(z)||
            !Float.isFinite(xx)||!Float.isFinite(yy)||!Float.isFinite(zz))return;
         edges.add(new float[]{x,y,z,xx,yy,zz});
@@ -70,7 +75,7 @@ public final class SpatialMap {
     public synchronized boolean exists(){return file.exists()&&file.length()>40;}
     public synchronized String description(){return description;}
     public synchronized void clear(){
-        locations.clear();voxels.clear();edges.clear();capturedFrames=0;
+        locations.clear();voxels.clear();edges.clear();edgeKeys.clear();capturedFrames=0;
         location=new float[]{0,0,0};rotation=new float[]{0,0,0,1};
         description="No map yet";
     }
