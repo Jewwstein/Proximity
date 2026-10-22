@@ -26,12 +26,12 @@ jobs:
       - name: Publish build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EchoSight-v0.4.0-test-APK
+          name: EchoSight-v0.5.0-test-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
       - name: Publish public test release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk EchoSight-v0.4.0.apk
-          gh release create echo-sight-v0.4.0 EchoSight-v0.4.0.apk --target "$GITHUB_SHA" --title "EchoSight v0.4.0 experimental sonar + camera vision" --notes "v0.4: wider letterboxed ARCore camera for tall-phone aspect ratio, 145k mapped samples, measured depth surface edges and ARCore plane outlines, 3D depth-line rendering and top-down view. Optional STEP DETECTOR + phone heading dead reckoning, adjustable stride, uncertainty warning, 24-step cap. Requires ACTIVITY_RECOGNITION permission for steps. No safe navigation in darkness; ARCore compatibility and phone behavior not physically verified." --prerelease || gh release upload echo-sight-v0.4.0 EchoSight-v0.4.0.apk --clobber
+          cp app/build/outputs/apk/debug/app-debug.apk EchoSight-v0.5.0.apk
+          gh release create echo-sight-v0.5.0 EchoSight-v0.5.0.apk --target "$GITHUB_SHA" --title "EchoSight v0.5.0 experimental sonar + camera vision" --notes "EchoSight 0.5: photo-based spatial room memory. While light is on, capture real full-color camera frames with ARCore pose, up to 240 locally stored images. In memory mode show nearest actual recorded view selected by gyro and experimental step estimate. Not a real-time dark camera, 3D model, or safe navigation. Phone compatibility and behavior not physically tested." --prerelease || gh release upload echo-sight-v0.5.0 EchoSight-v0.5.0.apk --clobber

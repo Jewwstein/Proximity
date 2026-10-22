@@ -1,27 +1,27 @@
-# EchoSight v0.4.0 — Wider Scan, Measured Surfaces & Experimental Steps
+# EchoSight v0.5.0 — Actual Photographic Room Memory
 
-A standalone Android ARCore spatial-memory experiment designed for a tall-screen Motorola Razr 2025. The prior v0.3.1 scanned an overly cropped preview and showed only disconnected sparse points.
+This is a **different strategy** from the v0.4 dot-cloud/wireframe viewer.
 
-## What's new
+## What it does
 
-- **Wide camera view**: ARCore frames default to a smaller **3:4 portrait display rectangle**, letterboxed instead of aggressively cropping the camera to the entire tall screen. Tap **WIDE CAM / FULL CAM** to compare. This changes display cropping, **not** the physical camera lens or its true field of view. Hardware zoom cannot be overcome by software.
-- **Real geometric surfaces**: collects substantially more ARCore point-cloud features and, if the phone supports ARCore Depth API, extracts local connected lines from actual depth samples (only neighboring measurements are connected). Also traces boundaries of genuine ARCore-detected horizontal and vertical planes, which can help when the Depth API is unavailable. No arbitrary room walls are invented.
-- **Depth view controls**: DARK MEMORY now defaults to glowing depth/plane **SURFACES**; switch to **POINTS** or **BOTH**. A top-down inset uses the same measured point geometry and indicates the estimated viewpoint.
-- **Saved map**: v0.4 persists up to 145k feature/depth points plus up to 80k measured edge segments. Old v0.3 maps load, but are only point clouds and **need a new lit scan to gain surfaces**.
-- **EXPERIMENTAL STEP estimation**: Android `TYPE_STEP_DETECTOR` or `TYPE_STEP_COUNTER` drives approximate step events. The phone rotation sensor gives an estimated forward direction, with a calibrated stride (STEP .50 / .63 / .76 / .90 m). Explicitly opt in with TRY STEPS; Android asks for ACTIVITY_RECOGNITION permission. The app assumes you held the phone pointing **in the actual direction you walked**, and starts at the last known scanned camera position; it does NOT truly know where you are. Position uncertainty grows and the demo stops after 24 steps. A top-down uncertainty circle and orange warning remain.
-- **No extra attachments**, no internet permissions, no saved camera photos or audio. Maps are kept privately on-device.
+1. **SCAN IN LIGHT:** EchoSight records real color camera photographs while you sweep the phone slowly through your room, moving between viewing positions and angles. Alongside each image it stores the ARCore camera **world position and orientation** from that scan session. Photographs come from the live ARCore OpenGL camera viewport, so they're already correctly oriented as displayed. It captures at most one image every ~0.85 seconds, only when the viewpoint changed sufficiently (roughly 26 cm or 17 degrees). Up to 240 photos are held per scan, reduced to max 800px before being stored on the phone. It may miss views if you move too quickly or tracking drops.
+2. **SAVE MAP:** Local photo files, frame positions, and mapped geometry are stored on the phone. No network permission and no image upload.
+3. **DARK MEMORY:** Rather than glowing wireframe points, the app shows a recorded photo of the **actual room** from the nearest available estimated viewpoint and orientation. You can turn your phone or swipe to switch between recorded views.
+4. **TRY STEPS:** Android's step sensor advances an **assumed** walking position from the last recorded scan endpoint; phone heading steers the estimate, and the app chooses a saved photo whose position and direction best match. Displays uncertainty and stops step estimates after 24 events. The map includes a small overhead sketch when spatial points are available.
 
-## Use
+## What this is NOT
 
-1. Install v0.4 over v0.3. Scan while the room is lit, with textured walls/furniture, moving smoothly sideways and around surfaces. The preview should have letterboxes rather than extreme crop.
-2. If supported, Depth API samples and ARCore wall/floor plane polygons will accumulate alongside regular 3D points. The viewer draws their evidenced connections. It does not guarantee all room surfaces are reconstructed.
-3. Save your scan, then tap DARK MEMORY, while still at the mapped endpoint. Turn the phone to explore the saved geometry and inspect the overhead inset.
-4. The **TRY STEPS** switch provides only a motion-estimation experiment. It is **not safe to use for walking in actual darkness**. Test it in a well-lit, cleared, stationary/controlled environment, with the phone facing forward, and compare the change in the overhead position marker.
-5. Recalibrate the stride length to your typical pace. Drift is uncorrected without a new visual relocalization. Reopen DARK MEMORY to reset the estimated position to the saved anchor.
+This is a **spatially indexed photographic tour**, not a continuous textured 3D reconstruction. The viewer shows only images actually captured while mapping. You may see discrete jumps, a missing photo, or a picture of the wrong spot if the step length or initial direction is inaccurate. It cannot see newly introduced obstacles, people or open doors. It has no camera localization in pitch darkness. If no recorded image matches the approximate pose, the photo disappears rather than pretend to show an object that's not there.
 
-## Hard limitations
-- Neither a camera without light nor gyroscope+pedometer can tell which hallway you are standing in. The phone does not measure true translational displacement while in darkness.
-- Turning the phone to look sideways while walking can confuse **heading versus walking direction**.
-- Step counts, stride length, gyroscope heading, and starting orientation cause accumulated drift. A saved map may not correspond to the real room after furniture moves.
-- **NOT A NAVIGATION SYSTEM. DO NOT USE IT TO AVOID OBSTACLES, STAIRS OR DROPOFFS IN THE DARK.**
-- This is tested for Android compilation, **not** validated on the actual Motorola Razr, ARCore tracking quality, or sensor behavior.
+Real photogrammetry, NeRFs, Gaussian splatting and mesh-texturing could interpolate viewpoints, but producing a high-quality room model would need substantial image overlap, offline reconstruction and reliable tracking; those steps are **not part of v0.5**.
+
+**DO NOT WALK AROUND IN DARKNESS WITH THIS.** It is an experimental replay system and cannot be used to avoid obstacles, stairs, pets, or tripping hazards.
+
+## Instructions
+
+- Install APK (same app ID as previous EchoSight).
+- In a room with lights ON, press **SCAN IN LIGHT**. Walk slowly to several locations and scan each area from different angles. Include your doorway, bed, desk, and corners, and capture overlapping views. The scan status should count `ROOM PHOTOS`—unlike before, these are images, not arbitrary point dots.
+- Tap **SAVE MAP**, then **DARK MEMORY**. Look around while **standing still** and you should see actual recorded photos. Swipe the screen to rotate the virtual tour.
+- For TRY STEPS, keep the lights on and floor clear while evaluating the estimate; it does not know your location. Photos match approximate pose, not physical motion measured by a camera in darkness.
+
+Build status: validated by Android Gradle GitHub Actions. No physical Razr performance, ARCore camera orientation, or photo alignment validation has been performed.
