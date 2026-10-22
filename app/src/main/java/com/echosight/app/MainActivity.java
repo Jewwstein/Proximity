@@ -326,7 +326,7 @@ public final class MainActivity extends Activity {
     private void openMemory(){
         if(scanning)stopScan();
         if(map.count()==0 && map.exists())map.load();
-        photoAtlas.load();
+        if(photoAtlas.count()==0)photoAtlas.load();
         boolean photos=photoAtlas.hasPhotos();
         selectedPhoto=-1;photoSerial++;
         photoDisplay.setVisibility(photos?View.VISIBLE:View.GONE);
