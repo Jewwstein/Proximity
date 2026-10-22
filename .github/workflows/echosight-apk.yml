@@ -26,12 +26,12 @@ jobs:
       - name: Publish build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EchoSight-v0.1.0-test-APK
+          name: EchoSight-v0.2.0-test-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
       - name: Publish public test release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk EchoSight-v0.1.0.apk
-          gh release create echo-sight-v0.1.0 EchoSight-v0.1.0.apk --target "$GITHUB_SHA" --title "EchoSight v0.1.0 experimental sonar + camera vision" --notes "Experimental Android prototype blending real camera pixel light enhancement / Sobel contours with optional near-ultrasonic acoustic reflections. Sonar is NON-DIRECTIONAL and distances are tentative. This is NOT a navigational aid. Not tested on physical phone hardware yet." --prerelease || gh release upload echo-sight-v0.1.0 EchoSight-v0.1.0.apk --clobber
+          cp app/build/outputs/apk/debug/app-debug.apk EchoSight-v0.2.0.apk
+          gh release create echo-sight-v0.2.0 EchoSight-v0.2.0.apk --target "$GITHUB_SHA" --title "EchoSight v0.2.0 experimental sonar + camera vision" --notes "Fixes Android speaker initialization by using AudioTrack streaming with properly sized buffers and sample-rate/channel fallback; adds multiple microphone sources and optional audible lower-frequency pulses. Gamma-optimized real-edge camera modes and raw-preview fallback. Hardware sonar measurements unverified; not a navigation aid." --prerelease || gh release upload echo-sight-v0.2.0 EchoSight-v0.2.0.apk --clobber
