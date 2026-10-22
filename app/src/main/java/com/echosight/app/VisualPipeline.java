@@ -48,14 +48,15 @@ public final class VisualPipeline {
         boost=Math.max(1f,Math.min(12f,boost));
         int[] adjusted=new int[total];
         byte[] blurred=new byte[total];
+        // Precompute the gamma function once per brightness level instead of
+        // hundreds of thousands of expensive pow() calls every camera frame.
+        int[] lut=new int[256];
+        for(int v=0;v<256;v++)
+            lut[v]=Math.min(255,Math.round((float)(255*
+                Math.pow(Math.min(1f,v*boost/255f),.78))));
         for(int i=0;i<total;i++){
             int c=rgb[i];
-            float red=(c>>16)&255, green=(c>>8)&255, blue=c&255;
-            // gamma/contrast mapping + a blue-white channel bias for outlines
-            int rr=Math.min(255,Math.round((float)(255*Math.pow(Math.min(1,red*boost/255),.78))));
-            int gg=Math.min(255,Math.round((float)(255*Math.pow(Math.min(1,green*boost/255),.78))));
-            int bb=Math.min(255,Math.round((float)(255*Math.pow(Math.min(1,blue*boost/255),.78))));
-            adjusted[i]=Color.rgb(rr,gg,bb);
+            adjusted[i]=Color.rgb(lut[(c>>16)&255],lut[(c>>8)&255],lut[c&255]);
         }
         // Fast local smoothing prevents low-light sensor noise becoming sharp
         // made-up contours. Actual camera edge evidence is mandatory.
