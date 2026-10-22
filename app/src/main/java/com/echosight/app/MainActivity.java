@@ -28,16 +28,18 @@ import java.util.Locale;
  * a visualization from a FROZEN viewpoint. Never use for walking/navigation.
  */
 public final class MainActivity extends Activity {
-    private static final int CAMERA_REQUEST=41;
+    private static final int CAMERA_REQUEST=41,STEP_REQUEST=42;
     private static final int CYAN=0xff7de8f8,WHITE=0xffe9f8ff,INK=0xff03111c;
     private GLSurfaceView surface;
     private ScanRenderer renderer;
     private MemoryView memoryView;
     private SpatialMap map;
     private TextView status,detail,warning,title;
-    private Button scanButton,saveButton,darkButton,deleteButton;
+    private Button scanButton,saveButton,darkButton,deleteButton,walkButton,wideButton,styleButton,strideButton;
     private Session session;
-    private boolean installRequested=false,scanning=false;
+    private boolean installRequested=false,scanning=false,wideFrame=true;
+    private final float[] strideChoices={.50f,.63f,.76f,.90f};
+    private int strideChoice=1,displayStyle=0;
     private float lastTouchX,lastTouchY;
     private int frameMessages=0;
     @Override public void onCreate(Bundle state){
@@ -85,6 +87,17 @@ public final class MainActivity extends Activity {
         surface.setVisibility(View.GONE);
 
         memoryView=new MemoryView(this);
+        memoryView.setStepUpdates((count,distance,error)->runOnUiThread(()->{
+            if(walkButton==null)return;
+            if(count>=24){
+                walkButton.setText("STEP LIMIT");
+                warning.setText("DRIFT LIMIT REACHED · STOP · RESET AT KNOWN LOCATION");
+            }else{
+                walkButton.setText("PAUSE WALK");
+                warning.setText(String.format(Locale.US,
+                    "STEP ESTIMATE %d · %.1f m · ±%.1f m drift · NOT SAFE",count,distance,error));
+            }
+        }));
         root.addView(memoryView,new FrameLayout.LayoutParams(-1,-1));
         memoryView.setOnTouchListener((view,e)->{
             if(!view.isShown())return false;
@@ -122,7 +135,7 @@ public final class MainActivity extends Activity {
         controls.setPadding(dp(10),dp(16),dp(10),dp(21));
         controls.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
             new int[]{0xff03111c,0xee03111c,0x0003111c}));
-        root.addView(controls,new FrameLayout.LayoutParams(-1,dp(189),Gravity.BOTTOM));
+        root.addView(controls,new FrameLayout.LayoutParams(-1,dp(247),Gravity.BOTTOM));
         LinearLayout first=new LinearLayout(this);
         first.setGravity(Gravity.CENTER_VERTICAL);
         controls.addView(first,new LinearLayout.LayoutParams(-1,dp(53)));
@@ -139,22 +152,53 @@ public final class MainActivity extends Activity {
         darkButton=button("DARK MEMORY");
         second.addView(darkButton,new LinearLayout.LayoutParams(0,dp(47),1));
         darkButton.setOnClickListener(v->openMemory());
-        deleteButton=button("CLEAR MAP");
-        LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,dp(47),.75f);cp.leftMargin=dp(7);
-        second.addView(deleteButton,cp);
+        walkButton=button("TRY STEPS");
+        LinearLayout.LayoutParams wp=new LinearLayout.LayoutParams(0,dp(47),.8f);wp.leftMargin=dp(7);
+        second.addView(walkButton,wp);
+        walkButton.setOnClickListener(v->toggleWalking());
+        LinearLayout third=new LinearLayout(this);
+        third.setGravity(Gravity.CENTER_VERTICAL);
+        controls.addView(third,new LinearLayout.LayoutParams(-1,dp(53)));
+        wideButton=button("WIDE CAM");
+        third.addView(wideButton,new LinearLayout.LayoutParams(0,dp(45),1));
+        wideButton.setOnClickListener(v->{
+            wideFrame=!wideFrame;
+            renderer.setWideView(wideFrame);
+            wideButton.setText(wideFrame?"WIDE CAM":"FULL CAM");
+        });
+        styleButton=button("SURFACES");
+        LinearLayout.LayoutParams sy=new LinearLayout.LayoutParams(0,dp(45),1);
+        sy.leftMargin=dp(5);
+        third.addView(styleButton,sy);
+        styleButton.setOnClickListener(v->{
+            displayStyle=(displayStyle+1)%3;memoryView.setStyle(displayStyle);
+            styleButton.setText(displayStyle==0?"SURFACES":displayStyle==1?"POINTS":"BOTH");
+        });
+        strideButton=button("STEP .63m");
+        LinearLayout.LayoutParams sl=new LinearLayout.LayoutParams(0,dp(45),1);
+        sl.leftMargin=dp(5);third.addView(strideButton,sl);
+        strideButton.setOnClickListener(v->{
+            strideChoice=(strideChoice+1)%strideChoices.length;
+            memoryView.setStepLength(strideChoices[strideChoice]);
+            strideButton.setText(String.format(Locale.US,"STEP %.2fm",strideChoices[strideChoice]));
+        });
+        deleteButton=button("CLEAR");
+        LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,dp(45),.65f);cp.leftMargin=dp(5);
+        third.addView(deleteButton,cp);
         deleteButton.setOnClickListener(v->{
             if(scanning)stopScan();
             map.delete();
             memoryView.deactivate();memoryView.setVisibility(View.VISIBLE);memoryView.activate(map);
             status.setText("MAP CLEARED");
             detail.setText("Scan a lit room to record actual 3D points.");
+            walkButton.setText("TRY STEPS");
         });
         TextView caution=label(
-            "Saved view follows your TURNING only; walking is NOT tracked. "+
-            "Do not use this app to navigate or avoid hazards in the dark.",
+            "STEP MODE estimates movement; drift grows with each step. "+
+            "NOT safe for walking in darkness, stairs or avoiding obstacles.",
             11,0xffffc0a7,false);
         caution.setGravity(Gravity.CENTER);caution.setMaxLines(3);
-        controls.addView(caution,new LinearLayout.LayoutParams(-1,dp(54)));
+        controls.addView(caution,new LinearLayout.LayoutParams(-1,dp(42)));
     }
     private void showMemoryIfPresent(){
         surface.setVisibility(View.GONE);
@@ -242,7 +286,7 @@ public final class MainActivity extends Activity {
         }
         boolean saved=map.save();
         status.setText(saved?"3D ROOM MEMORY SAVED":"COULD NOT SAVE MAP");
-        detail.setText(saved?map.count()+" world points stored locally. Open DARK MEMORY to view.":
+        detail.setText(saved?(map.count()+" 3D points and "+map.surfaceCount()+" measured depth edges saved. Open DARK MEMORY.") :
             "Map unavailable or storage error.");
     }
     private void openMemory(){
@@ -251,14 +295,54 @@ public final class MainActivity extends Activity {
         memoryView.setVisibility(View.VISIBLE);
         memoryView.activate(map);
         warning.setText("POSITION FROZEN · DO NOT WALK USING THIS MAP");
-        status.setText(map.count()+" SAVED POINTS · MEMORY VIEW");
-        detail.setText("Phone orientation rotates the saved view. Your footsteps cannot be tracked here.");
+        status.setText(map.count()+" SAVED POINTS · "+map.surfaceCount()+" SURFACE LINES");
+        detail.setText("Saved start point. TRY STEPS uses estimated stride + phone heading only. Do not use it to navigate.");
+        walkButton.setText("TRY STEPS");
         if(map.count()<35)status.setText("NO USABLE 3D MAP — SCAN FIRST");
+    }
+    private void toggleWalking(){
+        if(scanning){
+            status.setText("SAVE MAP FIRST");
+            detail.setText("Step estimates only run from a saved mapped start point.");
+            return;
+        }
+        if(map.count()<35){status.setText("NO MAP FOR STEP TEST");return;}
+        if(memoryView.isWalking()){
+            memoryView.setWalking(false);
+            walkButton.setText("RESUME STEPS");
+            warning.setText("STEP ESTIMATE PAUSED · position still uncertain");
+            return;
+        }
+        if(!memoryView.hasStepSensor()){
+            status.setText("NO ANDROID STEP SENSOR FOUND");
+            detail.setText("This phone did not expose TYPE_STEP_DETECTOR or TYPE_STEP_COUNTER.");
+            return;
+        }
+        if(android.os.Build.VERSION.SDK_INT>=29 &&
+           ContextCompat.checkSelfPermission(this,Manifest.permission.ACTIVITY_RECOGNITION)
+               !=PackageManager.PERMISSION_GRANTED){
+            requestPermissions(new String[]{Manifest.permission.ACTIVITY_RECOGNITION},STEP_REQUEST);
+            return;
+        }
+        beginExperimentalWalking();
+    }
+    private void beginExperimentalWalking(){
+        boolean okay=memoryView.setWalking(true);
+        if(okay){
+            walkButton.setText("PAUSE WALK");
+            warning.setText("STEP MODE EXPERIMENT · FACE PHONE IN TRAVEL DIRECTION · DRIFT");
+            detail.setText("Assuming start at LAST SCANNED camera location. Steps and heading are only estimates.");
+        }else{
+            status.setText("STEP SENSOR NOT AVAILABLE");
+            detail.setText("Could not activate Android step counter/detector.");
+        }
     }
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] result){
         super.onRequestPermissionsResult(request,permissions,result);
         if(request==CAMERA_REQUEST && result.length>0 &&result[0]==PackageManager.PERMISSION_GRANTED)
             startScan();
+        if(request==STEP_REQUEST && result.length>0 &&result[0]==PackageManager.PERMISSION_GRANTED)
+            beginExperimentalWalking();
     }
     @Override protected void onResume(){
         super.onResume();
