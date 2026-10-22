@@ -10,162 +10,252 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.view.View;
 import java.util.Arrays;
+import java.util.Locale;
 
 /**
- * Renders STORED ARCore points relative to a frozen physical location.
- * Phone rotation updates direction only; accelerometer motion is NOT used
- * to fabricate a physical position. Never use this as a walking guide.
+ * Draws measured world points and short real-depth edge segments, NOT guessed
+ * walls. Optional step-based position is EXPERIMENTAL inertial dead reckoning.
+ * No relocalization, no obstacle awareness, no safe navigation guarantee.
  */
 public final class MemoryView extends View implements SensorEventListener {
+    public interface StepUpdates { void changed(int steps,float meters,float uncertainty); }
     private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final SensorManager sensors;
-    private final Sensor orientationSensor;
-    private float[] points=new float[0];
-    private float[] cameraLocation=new float[]{0,0,0};
-    private float[] cameraQuaternion=new float[]{0,0,0,1};
-    private final float[] sensorNow=new float[9];
-    private final float[] sensorStart=new float[9];
-    private boolean startKnown=false,sensorKnown=false,enabled=false;
-    private int visible=0;
-    private float manualYaw=0,manualPitch=0;
-    private long lastRender=0;
+    private final Sensor orientationSensor,stepSensor;
+    private final float[] sensorNow=new float[9],sensorStart=new float[9];
+    private float[] points=new float[0],edges=new float[0];
+    private float[] cameraLocation={0,0,0},startLocation={0,0,0};
+    private float[] cameraQuaternion={0,0,0,1};
+    private boolean startKnown=false,sensorKnown=false,enabled=false,walking=false;
+    private boolean baselineKnown=false,stepCap=false;
+    private float stepBaseline=0,stepLength=.63f;
+    private float manualYaw=0,manualPitch=0,travel=0;
+    private long lastRender=0,lastStepNanos=0;
+    private int steps=0,style=0;
+    private StepUpdates stepUpdates;
+
     public MemoryView(Context c){
         super(c);
         sensors=(SensorManager)c.getSystemService(Context.SENSOR_SERVICE);
         Sensor game=sensors==null?null:sensors.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
         orientationSensor=game!=null?game:
             sensors==null?null:sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
-        setLayerType(View.LAYER_TYPE_SOFTWARE,null);
+        Sensor detector=sensors==null?null:sensors.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR);
+        stepSensor=detector!=null?detector:
+            sensors==null?null:sensors.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
     }
-    private static void identity(float[] r){Arrays.fill(r,0);r[0]=r[4]=r[8]=1f;}
+    public void setStepUpdates(StepUpdates callbacks){stepUpdates=callbacks;}
+    public boolean hasStepSensor(){return stepSensor!=null;}
+    public boolean hasDirectionSensor(){return orientationSensor!=null;}
+    public int stepCount(){return steps;}
+    public float stepDistance(){return travel;}
+    public float uncertainty(){return .35f + steps*.11f+steps*steps*.0035f;}
+    public boolean isWalking(){return walking;}
+    public void setStepLength(float meters){stepLength=Math.max(.35f,Math.min(1.10f,meters));}
+    public int surfaceCount(){return edges.length/6;}
+    public void setStyle(int s){style=(s%3+3)%3;invalidate();}
+    public int getStyle(){return style;}
     public void activate(SpatialMap map){
-        points=map.snapshot();
-        cameraLocation=map.position();
-        cameraQuaternion=map.orientation();
-        startKnown=false;manualYaw=0;manualPitch=0;
         enabled=true;
+        points=map.snapshot();
+        edges=map.surfaceSnapshot();
+        startLocation=map.position();
+        cameraQuaternion=map.orientation();
+        walking=false;stepCap=false;
+        steps=0;travel=0;baselineKnown=false;lastStepNanos=0;
+        cameraLocation=startLocation.clone();
+        manualYaw=0;manualPitch=0;startKnown=false;sensorKnown=false;
         if(sensors!=null)sensors.unregisterListener(this);
         if(sensors!=null&&orientationSensor!=null)
             sensors.registerListener(this,orientationSensor,SensorManager.SENSOR_DELAY_GAME);
         invalidate();
     }
     public void deactivate(){
-        enabled=false;
+        enabled=false;walking=false;
         if(sensors!=null)sensors.unregisterListener(this);
+    }
+    /** Explicitly opt into dead reckoning; caller must first get ACTIVITY_RECOGNITION. */
+    public boolean setWalking(boolean enabledMode){
+        if(!enabled)return false;
+        if(!enabledMode){
+            walking=false;
+            if(sensors!=null&&stepSensor!=null)sensors.unregisterListener(this,stepSensor);
+            invalidate();return true;
+        }
+        if(stepSensor==null||sensors==null)return false;
+        if(walking)return true;
+        // The mapped position is the final CAMERA location of the last scan,
+        // NOT the user's automatically detected current location.
+        walking=sensors.registerListener(this,stepSensor,SensorManager.SENSOR_DELAY_NORMAL);
+        baselineKnown=false;stepCap=false;lastStepNanos=0;
+        invalidate();
+        return walking;
+    }
+    public void resetWalking(){
+        steps=0;travel=0;baselineKnown=false;stepCap=false;lastStepNanos=0;
+        cameraLocation=startLocation.clone();
+        if(stepUpdates!=null)stepUpdates.changed(steps,travel,uncertainty());
         invalidate();
     }
-    public int numberOfPoints(){return points.length/3;}
-    public boolean hasDirectionSensor(){return orientationSensor!=null;}
     @Override public void onSensorChanged(SensorEvent e){
-        if(!enabled||e.sensor!=orientationSensor)return;
-        synchronized(sensorNow){
-            SensorManager.getRotationMatrixFromVector(sensorNow,e.values);
-            if(!startKnown) {
-                System.arraycopy(sensorNow,0,sensorStart,0,9);
-                startKnown=true;
+        if(!enabled)return;
+        if(e.sensor==orientationSensor){
+            synchronized(sensorNow){
+                SensorManager.getRotationMatrixFromVector(sensorNow,e.values);
+                if(!startKnown){System.arraycopy(sensorNow,0,sensorStart,0,9);startKnown=true;}
+                sensorKnown=true;
             }
-            sensorKnown=true;
+            if(System.currentTimeMillis()-lastRender>65){
+                lastRender=System.currentTimeMillis();invalidate();
+            }
+            return;
         }
-        if(System.currentTimeMillis()-lastRender>=52){
-            lastRender=System.currentTimeMillis();
-            invalidate();
+        if(e.sensor!=stepSensor||!walking||stepCap)return;
+        int increase=0;
+        if(stepSensor.getType()==Sensor.TYPE_STEP_DETECTOR){
+            if(e.timestamp-lastStepNanos>245_000_000L)increase=1;
+        }else {
+            if(!baselineKnown){stepBaseline=e.values[0];baselineKnown=true;return;}
+            int delta=Math.round(e.values[0]-stepBaseline);
+            increase=Math.max(0,Math.min(3,delta));
+            stepBaseline=e.values[0];
         }
+        if(increase<=0)return;
+        lastStepNanos=e.timestamp;
+        // Phone pointed forward = assumed travel direction, NOT verified.
+        float[] orientation=worldCameraRotation();
+        float dx=-orientation[2],dz=-orientation[8];
+        float norm=(float)Math.hypot(dx,dz);
+        if(norm<.01f)return;
+        dx/=norm;dz/=norm;
+        for(int i=0;i<increase;i++){
+            if(steps>=24){stepCap=true;walking=false;break;}
+            cameraLocation[0]+=dx*stepLength;
+            cameraLocation[2]+=dz*stepLength;
+            steps++;travel+=stepLength;
+        }
+        if(stepCap&&sensors!=null)sensors.unregisterListener(this,stepSensor);
+        if(stepUpdates!=null)stepUpdates.changed(steps,travel,uncertainty());
+        invalidate();
     }
     @Override public void onAccuracyChanged(Sensor s,int accuracy){}
     public void turnVirtual(float dx,float dy){
         manualYaw+=dx*.004f;
-        manualPitch=Math.max(-.75f,Math.min(.75f,manualPitch+dy*.004f));
+        manualPitch=Math.max(-.85f,Math.min(.85f,manualPitch+dy*.004f));
         invalidate();
     }
     private static void multiply(float[] a,float[] b,float[] out){
-        for(int row=0;row<3;row++){
+        for(int row=0;row<3;row++)
             for(int col=0;col<3;col++){
                 float sum=0;
                 for(int k=0;k<3;k++)sum+=a[row*3+k]*b[k*3+col];
                 out[row*3+col]=sum;
             }
-        }
     }
     private static void transpose(float[] in,float[] out){
         for(int r=0;r<3;r++)for(int c=0;c<3;c++)out[r*3+c]=in[c*3+r];
     }
     private static float[] quaternionMatrix(float[] q){
         float x=q[0],y=q[1],z=q[2],w=q[3];
-        float[] r=new float[9];
-        r[0]=1-2*(y*y+z*z);
-        r[1]=2*(x*y-z*w);
-        r[2]=2*(x*z+y*w);
-        r[3]=2*(x*y+z*w);
-        r[4]=1-2*(x*x+z*z);
-        r[5]=2*(y*z-x*w);
-        r[6]=2*(x*z-y*w);
-        r[7]=2*(y*z+x*w);
-        r[8]=1-2*(x*x+y*y);
-        return r;
+        return new float[]{
+            1-2*(y*y+z*z),2*(x*y-z*w),2*(x*z+y*w),
+            2*(x*y+z*w),1-2*(x*x+z*z),2*(y*z-x*w),
+            2*(x*z-y*w),2*(y*z+x*w),1-2*(x*x+y*y)
+        };
     }
     private float[] worldCameraRotation(){
         float[] base=quaternionMatrix(cameraQuaternion);
-        float[] delta=new float[9];identity(delta);
+        float[] delta=new float[9];delta[0]=delta[4]=delta[8]=1f;
         if(sensorKnown&&startKnown){
             float[] now=new float[9],start=new float[9],startT=new float[9];
             synchronized(sensorNow){
                 System.arraycopy(sensorNow,0,now,0,9);
                 System.arraycopy(sensorStart,0,start,0,9);
             }
-            transpose(start,startT);
-            multiply(startT,now,delta);
+            transpose(start,startT);multiply(startT,now,delta);
         }
         if(Math.abs(manualYaw)+Math.abs(manualPitch)>.0001f){
             float cy=(float)Math.cos(manualYaw),sy=(float)Math.sin(manualYaw);
             float cp=(float)Math.cos(manualPitch),sp=(float)Math.sin(manualPitch);
-            float[] yaw={cy,0,sy, 0,1,0, -sy,0,cy};
-            float[] pitch={1,0,0, 0,cp,-sp, 0,sp,cp};
-            float[] tmp=new float[9];multiply(yaw,pitch,tmp);
-            float[] combined=new float[9];multiply(delta,tmp,combined);delta=combined;
+            float[] yaw={cy,0,sy,0,1,0,-sy,0,cy};
+            float[] pitch={1,0,0,0,cp,-sp,0,sp,cp};
+            float[] combined=new float[9],tmp=new float[9];
+            multiply(yaw,pitch,tmp);multiply(delta,tmp,combined);delta=combined;
         }
         float[] world=new float[9];multiply(base,delta,world);
         return world;
+    }
+    private float[] project(float x,float y,float z,float[] orientation,
+                            float centerX,float centerY,float focal){
+        float dx=x-cameraLocation[0],dy=y-cameraLocation[1],dz=z-cameraLocation[2];
+        float cx=orientation[0]*dx+orientation[3]*dy+orientation[6]*dz;
+        float cy=orientation[1]*dx+orientation[4]*dy+orientation[7]*dz;
+        float cz=orientation[2]*dx+orientation[5]*dy+orientation[8]*dz;
+        float range=-cz;
+        if(range<.25f||range>16f)return null;
+        return new float[]{centerX+focal*cx/range,centerY-focal*cy/range,range};
     }
     @Override protected void onDraw(Canvas canvas){
         super.onDraw(canvas);
         canvas.drawColor(0xff020b14);
         if(!enabled)return;
-        float[] world=worldCameraRotation();
-        int width=getWidth(),height=getHeight();
-        float cx=width*.5f,cy=height*.50f,focal=width*.95f;
-        int count=0;
-        // Maximum of ~24k points per view; low resolution memory makes
-        // movement transparent and phone responsive.
-        int stride=Math.max(1,(points.length/3)/24000);
-        for(int i=0;i<points.length;i+=stride*3){
-            float dx=points[i]-cameraLocation[0];
-            float dy=points[i+1]-cameraLocation[1];
-            float dz=points[i+2]-cameraLocation[2];
-            float x=world[0]*dx+world[3]*dy+world[6]*dz;
-            float y=world[1]*dx+world[4]*dy+world[7]*dz;
-            float z=world[2]*dx+world[5]*dy+world[8]*dz;
-            float distance=-z;
-            if(distance<.28f||distance>16f)continue;
-            float px=cx+focal*x/distance,py=cy-focal*y/distance;
-            if(px<0||px>width||py<0||py>height)continue;
-            float radius=Math.max(.75f,Math.min(3.6f,3.2f/(float)Math.sqrt(distance)));
-            int alpha=(int)Math.max(43,Math.min(245,245-distance*14));
-            paint.setColor(Color.argb(alpha,96,229,255));
-            paint.setStyle(Paint.Style.FILL);
-            canvas.drawCircle(px,py,radius,paint);
-            count++;
+        int w=getWidth(),h=getHeight();
+        if(w<20||h<20)return;
+        float[] orientation=worldCameraRotation();
+        float cx=w*.5f,cy=h*.5f,focal=w*.78f;
+        int drawn=0;
+        // True depth continuity segments: only connect 3D neighboring samples
+        // originally from the same actual depth frame; do not synthesize walls.
+        if(style!=1){
+            int lineStride=Math.max(1,(edges.length/6)/15000);
+            paint.setStrokeWidth(1.6f*getResources().getDisplayMetrics().density);
+            paint.setStyle(Paint.Style.STROKE);
+            for(int i=0;i<edges.length;i+=6*lineStride){
+                float[] a=project(edges[i],edges[i+1],edges[i+2],orientation,cx,cy,focal);
+                float[] b=project(edges[i+3],edges[i+4],edges[i+5],orientation,cx,cy,focal);
+                if(a==null||b==null)continue;
+                if(Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1])>w*.28f)continue;
+                if((a[0]<-10&&b[0]<-10)||(a[0]>w+10&&b[0]>w+10)||
+                    (a[1]<-10&&b[1]<-10)||(a[1]>h+10&&b[1]>h+10))continue;
+                int alpha=(int)Math.max(35,Math.min(180,220-(a[2]+b[2])*11));
+                paint.setColor(Color.argb(alpha,48,229,248));
+                canvas.drawLine(a[0],a[1],b[0],b[1],paint);
+                drawn++;
+            }
         }
-        visible=count;
-        paint.setColor(0x8076deeb);paint.setStrokeWidth(2f);
-        canvas.drawLine(cx-12,cy,cx-5,cy,paint);
-        canvas.drawLine(cx+5,cy,cx+12,cy,paint);
-        canvas.drawLine(cx,cy-12,cx,cy-5,paint);
-        canvas.drawLine(cx,cy+5,cx,cy+12,paint);
+        int dots=0;
+        if(style!=0||edges.length==0){
+            paint.setStyle(Paint.Style.FILL);
+            int pointStride=Math.max(1,(points.length/3)/17500);
+            for(int i=0;i<points.length;i+=pointStride*3){
+                float[] a=project(points[i],points[i+1],points[i+2],orientation,cx,cy,focal);
+                if(a==null||a[0]<0||a[0]>w||a[1]<0||a[1]>h)continue;
+                float radius=Math.max(1.1f,Math.min(3.6f,3.0f/(float)Math.sqrt(a[2])));
+                int alpha=(int)Math.max(50,Math.min(230,247-a[2]*15));
+                paint.setColor(Color.argb(alpha,105,216,252));
+                canvas.drawCircle(a[0],a[1],radius,paint);dots++;
+            }
+        }
         paint.setStyle(Paint.Style.FILL);
-        paint.setTextSize(Math.max(12,getResources().getDisplayMetrics().scaledDensity*12));
-        paint.setColor(0xff9be5ef);
-        canvas.drawText("SAVED GEOMETRY • "+count+" points in view",18,height*.70f,paint);
-        paint.setColor(0xfff0bd8e);
-        canvas.drawText("POSITION FROZEN • NOT LIVE NAVIGATION",18,height*.75f,paint);
+        paint.setColor(0x929eeefc);
+        paint.setStrokeWidth(2.3f);
+        canvas.drawLine(cx-13,cy,cx-6,cy,paint);
+        canvas.drawLine(cx+6,cy,cx+13,cy,paint);
+        canvas.drawLine(cx,cy-13,cx,cy-6,paint);
+        canvas.drawLine(cx,cy+6,cx,cy+13,paint);
+        paint.setTextSize(12*getResources().getDisplayMetrics().scaledDensity);
+        paint.setColor(0xff9deaf3);
+        canvas.drawText(edges.length>0
+            ?("REAL DEPTH LINES "+drawn+" · POINTS "+dots)
+            :("NO DEPTH SURFACES · FEATURE DOTS "+dots),dp(13),h*.68f,paint);
+        paint.setColor(0xffffc495);
+        String label=walking
+            ?String.format(Locale.US,"STEP ESTIMATE %.1f m · ERROR ±%.1f m",travel,uncertainty())
+            :(steps>0?String.format(Locale.US,"STEPS PAUSED · %.1f m · DRIFT UNKNOWN",travel):
+            "SAVED VIEWPOINT · NO LIVE WALK TRACKING");
+        canvas.drawText(label,dp(13),h*.73f,paint);
+        if(stepCap)canvas.drawText("STEP LIMIT REACHED — RESET BEFORE MORE ESTIMATES",
+            dp(13),h*.76f,paint);
     }
+    private int dp(float v){return Math.round(v*getResources().getDisplayMetrics().density);}
 }
