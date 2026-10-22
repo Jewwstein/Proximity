@@ -239,9 +239,11 @@ public final class EchoAudio {
                 System.arraycopy(window,window.length-overlapLength,overlap,0,overlapLength);
             }
         }catch(SecurityException e){
+            running=false;
             emit("Microphone permission denied by Android");
         }catch(Throwable e){
             Log.e(TAG,"Acoustic initialization failed",e);
+            running=false;
             emit("Audio initialization error: "+String.valueOf(e.getMessage()));
         }finally{
             running=false;
