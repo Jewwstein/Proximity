@@ -38,6 +38,7 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
     private volatile int displayRotation=0;
     private int texture=0,program=0,locationPosition=-1,locationTex=-1,locationSampler=-1;
     private int width=1,height=1,frameCount=0;
+    private volatile boolean wideView=true;
     private long depthTimestamp=0,cloudTimestamp=0;
     private final FloatBuffer quad,texcoords;
     private final float[] vertex={-1,-1, 1,-1, -1,1, 1,1};
@@ -55,6 +56,7 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
         frameCount=0;
     }
     public void setRecording(boolean enable){recording=enable;}
+    public void setWideView(boolean enabled){wideView=enabled;}
     public void setRotation(int rot){displayRotation=rot;}
     @Override public void onSurfaceCreated(GL10 gl,EGLConfig config){
         GLES20.glClearColor(.015f,.05f,.085f,1);
@@ -89,14 +91,20 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
         width=w;height=h;GLES20.glViewport(0,0,w,h);
     }
     @Override public void onDrawFrame(GL10 gl){
+        GLES20.glViewport(0,0,width,height);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT|GLES20.GL_DEPTH_BUFFER_BIT);
         Session s=session;
         if(s==null || !recording)return;
         try{
             // The camera texture can only be bound on the GL render thread.
             s.setCameraTextureName(texture);
-            s.setDisplayGeometry(displayRotation,width,height);
+            // A 3:4 display instead of tall-phone center cropping gives a
+            // wider visible field in small rooms. This does not change optics.
+            int frameHeight=wideView?Math.min(height,Math.round(width*1.333333f)):height;
+            int lower=(height-frameHeight)/2;
+            s.setDisplayGeometry(displayRotation,width,frameHeight);
             Frame frame=s.update();
+            GLES20.glViewport(0,lower,width,frameHeight);
             if(frame.getTimestamp()!=0)renderCamera(frame);
             frameCount++;
             Camera camera=frame.getCamera();
@@ -146,7 +154,7 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
             cloudTimestamp=cloud.getTimestamp();
             FloatBuffer b=cloud.getPoints();b.rewind();
             int all=b.remaining()/4;
-            int skip=Math.max(1,all/500);
+            int skip=Math.max(1,all/1400);
             for(int i=0;i<all;i+=skip){
                 int p=i*4;
                 float confidence=b.get(p+3);
@@ -177,9 +185,16 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
             int stride=plane.getRowStride(),pixelStride=plane.getPixelStride();
             Pose cameraPose=camera.getPose();
             float[] xyz=new float[3],world=new float[3];
-            int step=Math.max(4,Math.min(dw,dh)/19);
+            int step=Math.max(3,Math.min(dw,dh)/36);
+            int cols=(dw-2*step+step-1)/step;
+            float[] prevRow=new float[cols*3];
+            boolean[] prevValid=new boolean[cols];
+            float[] thisRow=new float[cols*3];
+            boolean[] thisValid=new boolean[cols];
             for(int v=step;v<dh-step;v+=step){
-                for(int u=step;u<dw-step;u+=step){
+                java.util.Arrays.fill(thisValid,false);
+                int col=0;
+                for(int u=step;u<dw-step;u+=step,col++){
                     int index=v*stride+u*pixelStride;
                     if(index+1>=bytes.limit())continue;
                     int mm=bytes.getShort(index)&0xffff;
@@ -190,7 +205,23 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
                     xyz[2]=-z;
                     cameraPose.transformPoint(xyz,0,world,0);
                     map.add(world[0],world[1],world[2]);
+                    if(col<thisValid.length){
+                        thisValid[col]=true;
+                        thisRow[col*3]=world[0];thisRow[col*3+1]=world[1];thisRow[col*3+2]=world[2];
+                        if(col>0 && thisValid[col-1]){
+                            int p=(col-1)*3;
+                            map.addSurfaceEdge(world[0],world[1],world[2],
+                                thisRow[p],thisRow[p+1],thisRow[p+2]);
+                        }
+                        if(prevValid[col]){
+                            int p=col*3;
+                            map.addSurfaceEdge(world[0],world[1],world[2],
+                                prevRow[p],prevRow[p+1],prevRow[p+2]);
+                        }
+                    }
                 }
+                float[] swap=prevRow;prevRow=thisRow;thisRow=swap;
+                boolean[] validSwap=prevValid;prevValid=thisValid;thisValid=validSwap;
             }
         }catch(NotYetAvailableException ignored){
         }catch(Throwable e){Log.w(TAG,"Depth sampling skipped",e);}
