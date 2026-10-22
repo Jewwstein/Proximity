@@ -54,7 +54,7 @@ public final class MainActivity extends ComponentActivity {
     private PreviewView preview;
     private ImageView enhancedImage;
     private TextView cameraState,sonarState,mainMessage;
-    private Button soundToggle,modeToggle,torchToggle;
+    private Button soundToggle,modeToggle,torchToggle,frequencyToggle;
     private SonarOverlay graphic;
     private Camera boundCamera;
     private android.graphics.Bitmap latestRendered;
@@ -62,7 +62,7 @@ public final class MainActivity extends ComponentActivity {
     private float gain=1.20f;
     private boolean torchOn=false,active=true;
     private boolean requestSoundAfterPermission=false;
-    private int previousDarkCounter=0;
+    private int previousDarkCounter=0,missingCameraFrames=0;
     private final Runnable cameraLoop=new Runnable() {
         @Override public void run(){
             if(!active)return;
@@ -118,6 +118,7 @@ public final class MainActivity extends ComponentActivity {
         enhancedImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
         enhancedImage.setBackgroundColor(DEEP);
         root.addView(enhancedImage,new FrameLayout.LayoutParams(-1,-1));
+        enhancedImage.setVisibility(View.GONE);
 
         graphic=new SonarOverlay();
         root.addView(graphic,new FrameLayout.LayoutParams(-1,-1));
@@ -178,6 +179,21 @@ public final class MainActivity extends ComponentActivity {
             @Override public void onStartTrackingTouch(SeekBar v){}
             @Override public void onStopTrackingTouch(SeekBar v){}
         });
+        frequencyToggle=button("PING: HIGH");
+        LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(dp(116),dp(44));
+        fp.leftMargin=dp(6);
+        gainRow.addView(frequencyToggle,fp);
+        frequencyToggle.setOnClickListener(v->{
+            boolean enable=!sonar.isAudibleFallback();
+            if(sonar.isRunning())sonar.stop();
+            sonar.setAudibleFallback(enable);
+            frequencyToggle.setText(enable?"PING: AUDIBLE":"PING: HIGH");
+            sonarState.setText(enable
+                ?"Lower 9–12 kHz chirps may be audible. Press START SONAR."
+                :"High 14.5–16.9 kHz chirps selected. Press START SONAR.");
+            soundToggle.setText("START SONAR");
+            graphic.setActive(false);
+        });
         controls.addView(gainRow,new LinearLayout.LayoutParams(-1,dp(48)));
 
         TextView footnote=text("EXPLORE ONLY · NOT SAFE FOR WALKING OR OBSTACLE AVOIDANCE\n"+
@@ -231,7 +247,14 @@ public final class MainActivity extends ComponentActivity {
     private void captureAndEnhance(){
         if(videoBusy.get())return;
         Bitmap snapshot=preview.getBitmap();
-        if(snapshot==null||snapshot.getWidth()<100)return;
+        if(snapshot==null||snapshot.getWidth()<100){
+            if(++missingCameraFrames==20){
+                cameraState.setText("Camera frame unavailable — showing raw camera. Restart if needed.");
+                enhancedImage.setVisibility(View.GONE);
+            }
+            return;
+        }
+        missingCameraFrames=0;
         if(!videoBusy.compareAndSet(false,true)){snapshot.recycle();return;}
         final int videoMode=mode;final float chosenGain=gain;
         videoWorker.execute(()->{
@@ -241,6 +264,7 @@ public final class MainActivity extends ComponentActivity {
                     if(!active){result.bitmap.recycle();return;}
                     Bitmap oldFrame=latestRendered;
                     enhancedImage.setImageBitmap(result.bitmap);
+                    enhancedImage.setVisibility(View.VISIBLE);
                     latestRendered=result.bitmap;
                     if(oldFrame!=null && !oldFrame.isRecycled())
                         ui.postDelayed(()->{if(!oldFrame.isRecycled())oldFrame.recycle();},550);
