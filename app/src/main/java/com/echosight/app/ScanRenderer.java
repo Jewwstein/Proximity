@@ -1,6 +1,7 @@
 package com.echosight.app;
 
 import android.media.Image;
+import android.graphics.Bitmap;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
@@ -33,6 +34,8 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
     }
     private final SpatialMap map;
     private final Updates listener;
+    private final PhotoAtlas photos;
+    private long lastPhotoMillis=0;
     private volatile Session session;
     private volatile boolean recording=false;
     private volatile boolean depthSupported=false;
@@ -43,8 +46,8 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
     private long depthTimestamp=0,cloudTimestamp=0;
     private final FloatBuffer quad,texcoords;
     private final float[] vertex={-1,-1, 1,-1, -1,1, 1,1};
-    public ScanRenderer(SpatialMap map,Updates callback){
-        this.map=map;listener=callback;
+    public ScanRenderer(SpatialMap map,PhotoAtlas photos,Updates callback){
+        this.map=map;this.photos=photos;listener=callback;
         quad=buffer(vertex);
         texcoords=buffer(new float[8]);
     }
@@ -120,9 +123,14 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
                 capturePoints(frame);
                 if(depthSupported && frameCount%10==0)captureDepth(frame,camera);
                 if(frameCount%30==0)capturePlanes(s);
+                // Save real photographed keyframes. Store the matching tracked
+                // camera pose at exposure time, never generated imagery.
+                if(frameCount%12==0 && System.currentTimeMillis()-lastPhotoMillis>850){
+                    capturePhoto(camera.getDisplayOrientedPose(),width,frameHeight,lower);
+                }
                 if(frameCount%15==0)
                     listener.onScanFrame(map.count(),map.frames(),true,
-                        depthSupported?"Depth + tracked feature map":"Tracked feature map (no Depth API)");
+                        photos.count()+" real photos saved in this AR scan");
             }
         }catch(Throwable e){
             if(frameCount%30==0)Log.w(TAG,"Scan frame unavailable",e);
@@ -132,6 +140,38 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
             frameCount++;
         }
     }
+    private void capturePhoto(Pose cameraPose,int displayWidth,int displayHeight,int yOrigin){
+        if(photos.count()>=PhotoAtlas.MAX_FRAMES)return;
+        // Read the already-rendered upright camera-only surface. This bypasses
+        // CPU YUV image rotation and uses the exact viewport user is scanning.
+        // Read at most once per ~0.85s; never record UI overlays.
+        int rw=displayWidth,rh=displayHeight;
+        if(rw<100||rh<100)return;
+        ByteBuffer pixels=ByteBuffer.allocateDirect(rw*rh*4).order(ByteOrder.LITTLE_ENDIAN);
+        try{
+            GLES20.glReadPixels(0,yOrigin,rw,rh,GLES20.GL_RGBA,
+                GLES20.GL_UNSIGNED_BYTE,pixels);
+            int error=GLES20.glGetError();
+            if(error!=GLES20.GL_NO_ERROR){Log.w(TAG,"Camera photo GL readback failed "+error);return;}
+            int[] argb=new int[rw*rh];
+            // OpenGL pixels are RGBA, bottom-up. ByteBuffer little-endian
+            // turns RGBA bytes into an ABGR integer.
+            for(int y=0;y<rh;y++){
+                int destination=(rh-1-y)*rw;
+                for(int x=0;x<rw;x++){
+                    int packed=pixels.getInt();
+                    int red=packed&255,green=(packed>>8)&255,blue=(packed>>16)&255;
+                    argb[destination+x]=0xff000000|(red<<16)|(green<<8)|blue;
+                }
+            }
+            Bitmap bitmap=Bitmap.createBitmap(argb,rw,rh,Bitmap.Config.ARGB_8888);
+            photos.add(bitmap,cameraPose);
+            lastPhotoMillis=System.currentTimeMillis();
+        }catch(OutOfMemoryError oom){
+            Log.w(TAG,"Photo capture memory budget exhausted",oom);
+        }catch(Throwable e){Log.w(TAG,"Camera photo capture failed",e);}
+    }
+
     private void renderCamera(Frame f){
         FloatBuffer coords=buffer(vertex);
         texcoords.position(0);
