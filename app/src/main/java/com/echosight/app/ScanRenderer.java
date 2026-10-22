@@ -11,6 +11,7 @@ import com.google.ar.core.Config;
 import com.google.ar.core.Coordinates2d;
 import com.google.ar.core.Frame;
 import com.google.ar.core.PointCloud;
+import com.google.ar.core.Plane;
 import com.google.ar.core.Pose;
 import com.google.ar.core.Session;
 import com.google.ar.core.TrackingState;
@@ -118,6 +119,7 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
                 map.rememberPose(camera.getDisplayOrientedPose());
                 capturePoints(frame);
                 if(depthSupported && frameCount%10==0)captureDepth(frame,camera);
+                if(frameCount%30==0)capturePlanes(s);
                 if(frameCount%15==0)
                     listener.onScanFrame(map.count(),map.frames(),true,
                         depthSupported?"Depth + tracked feature map":"Tracked feature map (no Depth API)");
@@ -162,6 +164,51 @@ public final class ScanRenderer implements GLSurfaceView.Renderer {
                 map.add(b.get(p),b.get(p+1),b.get(p+2));
             }
         }catch(Throwable e){Log.w(TAG,"Point sampling skipped",e);}
+    }
+    private void capturePlanes(Session session){
+        // When the Depth API is unavailable, ARCore tracked horizontal and
+        // vertical planes still contribute REAL detected planar boundaries.
+        try{
+            int segments=0;
+            for(Plane plane:session.getAllTrackables(Plane.class)){
+                if(plane.getTrackingState()!=TrackingState.TRACKING ||
+                    plane.getSubsumedBy()!=null)continue;
+                FloatBuffer polygon=plane.getPolygon();
+                polygon.rewind();
+                int n=polygon.remaining()/2;
+                if(n<3)continue;
+                Pose pose=plane.getCenterPose();
+                float[] localA=new float[3],localB=new float[3];
+                float[] start=new float[3],end=new float[3],last=new float[3],next=new float[3];
+                for(int i=0;i<n && segments<380;i++){
+                    int j=(i+1)%n;
+                    localA[0]=polygon.get(i*2);
+                    localA[1]=0;
+                    localA[2]=polygon.get(i*2+1);
+                    localB[0]=polygon.get(j*2);
+                    localB[1]=0;
+                    localB[2]=polygon.get(j*2+1);
+                    pose.transformPoint(localA,0,start,0);
+                    pose.transformPoint(localB,0,end,0);
+                    float distance=(float)Math.sqrt(
+                        (start[0]-end[0])*(start[0]-end[0])+
+                        (start[1]-end[1])*(start[1]-end[1])+
+                        (start[2]-end[2])*(start[2]-end[2]));
+                    int steps=Math.max(1,Math.min(80,(int)Math.ceil(distance/.18)));
+                    System.arraycopy(start,0,last,0,3);
+                    for(int step=1;step<=steps && segments<380;step++){
+                        float t=step/(float)steps;
+                        for(int k=0;k<3;k++)next[k]=start[k]+t*(end[k]-start[k]);
+                        map.add(last[0],last[1],last[2]);
+                        map.add(next[0],next[1],next[2]);
+                        map.addSurfaceEdge(last[0],last[1],last[2],
+                            next[0],next[1],next[2]);
+                        System.arraycopy(next,0,last,0,3);
+                        segments++;
+                    }
+                }
+            }
+        }catch(Throwable e){Log.w(TAG,"Plane outline capture skipped",e);}
     }
     private void captureDepth(Frame frame,Camera camera){
         // Camera-space unprojection of sparse depth samples.
