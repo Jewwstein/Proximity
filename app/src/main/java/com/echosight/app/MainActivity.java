@@ -193,8 +193,17 @@ public final class MainActivity extends Activity {
         sy.leftMargin=dp(5);
         third.addView(styleButton,sy);
         styleButton.setOnClickListener(v->{
-            displayStyle=(displayStyle+1)%3;memoryView.setStyle(displayStyle);
-            styleButton.setText(displayStyle==0?"SURFACES":displayStyle==1?"POINTS":"BOTH");
+            if(photoAtlas.hasPhotos()){
+                boolean showing=photoDisplay.getVisibility()==View.VISIBLE;
+                photoDisplay.setVisibility(showing?View.GONE:View.VISIBLE);
+                memoryView.setPhotoMode(!showing);
+                styleButton.setText(showing?"GEOMETRY":"PHOTOS");
+                if(!showing){selectedPhoto=-1;memoryView.updatePhoto();}
+            }else{
+                displayStyle=(displayStyle+1)%3;memoryView.setStyle(displayStyle);
+                styleButton.setText(displayStyle==0?"SURFACES":
+                    displayStyle==1?"POINTS":"BOTH");
+            }
         });
         strideButton=button("STEP .63m");
         LinearLayout.LayoutParams sl=new LinearLayout.LayoutParams(0,dp(45),1);
@@ -229,6 +238,7 @@ public final class MainActivity extends Activity {
         if(map.count()>0 || photoAtlas.hasPhotos()){
             photoDisplay.setVisibility(photoAtlas.hasPhotos()?View.VISIBLE:View.GONE);
             memoryView.setPhotoMode(photoAtlas.hasPhotos());
+            styleButton.setText(photoAtlas.hasPhotos()?"PHOTOS":"SURFACES");
             memoryView.activate(map);
             memoryView.updatePhoto();
             status.setText(photoAtlas.count()+" recorded photos · "+map.count()+" points");
@@ -331,6 +341,7 @@ public final class MainActivity extends Activity {
         selectedPhoto=-1;photoSerial++;
         photoDisplay.setVisibility(photos?View.VISIBLE:View.GONE);
         memoryView.setPhotoMode(photos);
+        styleButton.setText(photos?"PHOTOS":"SURFACES");
         memoryView.setVisibility(View.VISIBLE);
         memoryView.activate(map);
         memoryView.updatePhoto();
