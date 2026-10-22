@@ -194,6 +194,12 @@ public final class MainActivity extends Activity {
                 return;
             }
             if(session==null){
+                // A new ARCore session has a new coordinate origin. Never merge
+                // an old saved map into newly acquired world coordinates.
+                if(map.count()>0){
+                    map.clear(); // Existing saved file remains until SAVE MAP overwrites it.
+                    status.setText("NEW SCAN · previous file kept until saving");
+                }
                 session=new Session(this);
                 Config config=session.getConfig();
                 boolean depth=session.isDepthModeSupported(Config.DepthMode.AUTOMATIC);
@@ -269,6 +275,8 @@ public final class MainActivity extends Activity {
             try{surface.onPause();}catch(Throwable ignored){}
             try{if(session!=null)session.pause();}catch(Throwable ignored){}
             scanning=false;scanButton.setText("SCAN IN LIGHT");
+            if(map.count()>=35)map.save();
+            if(memoryView!=null){memoryView.setVisibility(View.VISIBLE);memoryView.activate(map);}
         }
         if(memoryView!=null)memoryView.deactivate();
         super.onPause();

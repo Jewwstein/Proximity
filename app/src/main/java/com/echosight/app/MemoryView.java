@@ -44,6 +44,7 @@ public final class MemoryView extends View implements SensorEventListener {
         cameraQuaternion=map.orientation();
         startKnown=false;manualYaw=0;manualPitch=0;
         enabled=true;
+        if(sensors!=null)sensors.unregisterListener(this);
         if(sensors!=null&&orientationSensor!=null)
             sensors.registerListener(this,orientationSensor,SensorManager.SENSOR_DELAY_GAME);
         invalidate();
