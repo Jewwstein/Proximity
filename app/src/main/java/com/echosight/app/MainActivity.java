@@ -246,6 +246,7 @@ public final class MainActivity extends Activity {
                 }
                 session=new Session(this);
                 Config config=session.getConfig();
+                config.setPlaneFindingMode(Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL);
                 boolean depth=session.isDepthModeSupported(Config.DepthMode.AUTOMATIC);
                 if(depth)config.setDepthMode(Config.DepthMode.AUTOMATIC);
                 session.configure(config);
