@@ -317,7 +317,7 @@ public final class MainActivity extends Activity {
             detail.setText("Scan a well-lit textured space and collect more points first.");
             return;
         }
-        boolean saved=map.count()>=35?map.save():photoAtlas.count()>=3;
+        boolean saved=map.save();
         photoAtlas.save();
         status.setText(saved?"3D ROOM MEMORY SAVED":"COULD NOT SAVE MAP");
         detail.setText(saved?(photoAtlas.count()+" actual photos recorded, plus "+map.surfaceCount()+" optional depth lines. Open DARK MEMORY.") :
@@ -325,9 +325,10 @@ public final class MainActivity extends Activity {
     }
     private void openMemory(){
         if(scanning)stopScan();
-        if(map.count()<35 && map.exists())map.load();
+        if(map.count()==0 && map.exists())map.load();
         photoAtlas.load();
         boolean photos=photoAtlas.hasPhotos();
+        selectedPhoto=-1;photoSerial++;
         photoDisplay.setVisibility(photos?View.VISIBLE:View.GONE);
         memoryView.setPhotoMode(photos);
         memoryView.setVisibility(View.VISIBLE);
@@ -441,7 +442,8 @@ public final class MainActivity extends Activity {
             try{surface.onPause();}catch(Throwable ignored){}
             try{if(session!=null)session.pause();}catch(Throwable ignored){}
             scanning=false;scanButton.setText("SCAN IN LIGHT");
-            if(map.count()>=35)map.save();
+            if(map.count()>=35 || photoAtlas.count()>=3)map.save();
+            photoAtlas.save();
             if(memoryView!=null){memoryView.setVisibility(View.VISIBLE);memoryView.activate(map);}
         }
         if(memoryView!=null)memoryView.deactivate();

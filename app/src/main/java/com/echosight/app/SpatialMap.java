@@ -72,7 +72,7 @@ public final class SpatialMap {
         }
         return all;
     }
-    public synchronized boolean exists(){return file.exists()&&file.length()>40;}
+    public synchronized boolean exists(){return file.exists()&&file.length()>=40;}
     public synchronized String description(){return description;}
     public synchronized void clear(){
         locations.clear();voxels.clear();edges.clear();edgeKeys.clear();capturedFrames=0;
@@ -83,7 +83,6 @@ public final class SpatialMap {
         clear();file.delete();
     }
     public synchronized boolean save(){
-        if(locations.size()<35)return false;
         File temp=new File(context.getFilesDir(),"echosight-tmp.bin");
         try(DataOutputStream out=new DataOutputStream(new BufferedOutputStream(new FileOutputStream(temp)))){
             out.writeInt(0x4543484F);out.writeInt(FORMAT);
@@ -111,7 +110,7 @@ public final class SpatialMap {
             int version=in.readInt();
             if(version!=1&&version!=FORMAT)return false;
             int length=in.readInt();
-            if(length<35||length>MAX_POINTS)return false;
+            if(length<0||length>MAX_POINTS)return false;
             for(int i=0;i<3;i++)pos[i]=in.readFloat();
             for(int i=0;i<4;i++)quat[i]=in.readFloat();
             for(int i=0;i<length;i++){
