@@ -1,4 +1,4 @@
-# EchoSight 0.3.0 — Spatial Memory (Android)
+# EchoSight 0.3.1 — Spatial Memory (Android)
 
 This release is a **separate sensing experiment** from the v0.1-v0.2 acoustic sonar prototype. The goal is to scan real geometry in light and retain it as a ghostly map after the lights go off, using the Motorola Razr's actual built-in cameras and motion sensors.
 
@@ -22,10 +22,12 @@ Renders saved points as glowing cyan 3D dots against pure black, using the **las
 - The ARCore runtime determines whether a given phone supports tracking and optional Depth API. **The Motorola Razr 2025 was not explicitly identifiable on Google's published supported model list, so actual ARCore availability is not assumed.**
 - A missing Depth API still permits sparser ARCore point-cloud mapping if ARCore tracking works.
 - Without ARCore support, the app clearly reports the limitation, and can display a previously saved local map if one exists.
-- This mode does **not** require a new sensor attachment. It may ask to install Google Play Services for AR if missing.
+- Every new ARCore session starts a new coordinate map; **an older saved map cannot be merged into a new session** without actual relocalization. The app clears the in-memory map when starting a new ARCore session; the previously saved file remains on disk until overwritten. The app saves an active scan when backgrounded.
+
+This mode does **not** require a new sensor attachment. It may ask to install Google Play Services for AR if missing.
 
 ## Install and test
-1. Install EchoSight v0.3.0 Android APK over the old EchoSight. No Plain Sight changes.
+1. Install EchoSight v0.3.1 Android APK over the old EchoSight. No Plain Sight changes.
 2. Tap **SCAN IN LIGHT**, grant camera access, and accept the Google Play Services for AR installation if prompted.
 3. Point toward textured walls, furniture, doorway edges and the floor, moving **slowly**. The screen should show a genuine camera view and a count of mapped points.
 4. Press **SAVE MAP** after the counter rises, then **DARK MEMORY**. Turn your phone while standing **in the same place**, to see the saved dot cloud move relative to its remembered viewpoint.
