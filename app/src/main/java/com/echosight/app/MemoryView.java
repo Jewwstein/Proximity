@@ -256,6 +256,61 @@ public final class MemoryView extends View implements SensorEventListener {
         canvas.drawText(label,dp(13),h*.73f,paint);
         if(stepCap)canvas.drawText("STEP LIMIT REACHED — RESET BEFORE MORE ESTIMATES",
             dp(13),h*.76f,paint);
+        drawOverhead(canvas,orientation);
+    }
+    private void drawOverhead(Canvas canvas,float[] cameraRotation){
+        if(points.length<30)return;
+        float x0=Float.MAX_VALUE,x1=-Float.MAX_VALUE,z0=Float.MAX_VALUE,z1=-Float.MAX_VALUE;
+        for(int i=0;i<points.length;i+=12){
+            float x=points[i],z=points[i+2];
+            if(x<x0)x0=x;if(x>x1)x1=x;
+            if(z<z0)z0=z;if(z>z1)z1=z;
+        }
+        float span=Math.max(1.75f,Math.max(x1-x0,z1-z0));
+        // This is an occupancy *sketch* of measured points, not a certified floor plan.
+        float box=dp(127),left=getWidth()-box-dp(12),top=dp(211);
+        float inside=box-dp(17),scale=inside/span;
+        float xCenter=(x0+x1)*.5f,zCenter=(z0+z1)*.5f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(0xee071f2c);
+        canvas.drawRoundRect(left,top,left+box,top+box,dp(10),dp(10),paint);
+        paint.setColor(0xff92dfea);
+        paint.setTextSize(dp(9));
+        canvas.drawText("SCANNED TOP VIEW",left+dp(8),top+dp(13),paint);
+        canvas.save();
+        canvas.clipRect(left+dp(4),top+dp(18),left+box-dp(4),top+box-dp(4));
+        for(int i=0;i<points.length;i+=Math.max(3,((points.length/3)/1100)*3)){
+            float px=left+box*.5f+(points[i]-xCenter)*scale;
+            float py=top+box*.52f+(points[i+2]-zCenter)*scale;
+            paint.setColor(0x8b5acbdf);
+            canvas.drawCircle(px,py,dp(.75f),paint);
+        }
+        if(edges.length>0){
+            paint.setStrokeWidth(dp(.8f));paint.setColor(0xbb4ff5e9);
+            for(int i=0;i<edges.length;i+=Math.max(6,((edges.length/6)/700)*6)){
+                float px=left+box*.5f+(edges[i]-xCenter)*scale;
+                float py=top+box*.52f+(edges[i+2]-zCenter)*scale;
+                float qx=left+box*.5f+(edges[i+3]-xCenter)*scale;
+                float qy=top+box*.52f+(edges[i+5]-zCenter)*scale;
+                canvas.drawLine(px,py,qx,qy,paint);
+            }
+        }
+        float px=left+box*.5f+(cameraLocation[0]-xCenter)*scale;
+        float py=top+box*.52f+(cameraLocation[2]-zCenter)*scale;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(0xfffbc389);canvas.drawCircle(px,py,dp(3),paint);
+        paint.setStrokeWidth(dp(1.8f));
+        paint.setColor(0xfffbdcb6);
+        float dx=-cameraRotation[2],dz=-cameraRotation[8];
+        float d=(float)Math.hypot(dx,dz);
+        if(d>.01f)canvas.drawLine(px,py,px+dx/d*dp(14),py+dz/d*dp(14),paint);
+        if(steps>0){
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setColor(0x99ffc38f);paint.setStrokeWidth(dp(.8f));
+            canvas.drawCircle(px,py,uncertainty()*scale,paint);
+        }
+        canvas.restore();
+        paint.setStyle(Paint.Style.FILL);
     }
     private int dp(float v){return Math.round(v*getResources().getDisplayMetrics().density);}
 }
