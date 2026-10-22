@@ -26,6 +26,7 @@ public final class PhotoAtlas {
     private final ArrayList<Entry> entries=new ArrayList<>();
     private final ExecutorService writer=Executors.newSingleThreadExecutor();
     private volatile int written=0;
+    private volatile int generation=0;
     public static final class Entry {
         public final int number;
         public final float[] position,rotation;
@@ -47,6 +48,7 @@ public final class PhotoAtlas {
         load();
     }
     public synchronized void reset() {
+        generation++;
         entries.clear();written=0;
         for(File f:directory.listFiles()==null?new File[0]:directory.listFiles()){
             if(!f.isDirectory())f.delete();
@@ -77,9 +79,11 @@ public final class PhotoAtlas {
             if(d<.26f && angle<.30f){source.recycle();return false;}
         }
         final Entry e=new Entry(entries.size(),p,q);
+        final int currentGeneration=generation;
         entries.add(e);
         writer.execute(()->{
             try{
+                if(generation!=currentGeneration)return;
                 Bitmap reduced=source;
                 int longest=Math.max(source.getWidth(),source.getHeight());
                 if(longest>800){
@@ -92,7 +96,10 @@ public final class PhotoAtlas {
                     reduced.compress(Bitmap.CompressFormat.JPEG,83,output);
                 }
                 if(reduced!=source)reduced.recycle();
-                synchronized(PhotoAtlas.this){written++;writeIndex();}
+                synchronized(PhotoAtlas.this){
+                    if(generation!=currentGeneration){imageFile(e.number).delete();return;}
+                    written++;writeIndex();
+                }
             }catch(Throwable err){Log.w(TAG,"Frame save failed",err);}
             finally{source.recycle();}
         });
