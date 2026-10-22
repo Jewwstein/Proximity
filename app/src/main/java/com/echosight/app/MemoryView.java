@@ -19,6 +19,7 @@ import java.util.Locale;
  */
 public final class MemoryView extends View implements SensorEventListener {
     public interface StepUpdates { void changed(int steps,float meters,float uncertainty); }
+    public interface ViewUpdates { void changed(float[] position,float[] forward,int steps,float uncertainty); }
     private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final SensorManager sensors;
     private final Sensor orientationSensor,stepSensor;
@@ -33,6 +34,8 @@ public final class MemoryView extends View implements SensorEventListener {
     private long lastRender=0,lastStepNanos=0;
     private int steps=0,style=0;
     private StepUpdates stepUpdates;
+    private ViewUpdates viewUpdates;
+    private boolean photoMode=false;
 
     public MemoryView(Context c){
         super(c);
@@ -45,6 +48,15 @@ public final class MemoryView extends View implements SensorEventListener {
             sensors==null?null:sensors.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
     }
     public void setStepUpdates(StepUpdates callbacks){stepUpdates=callbacks;}
+    public void setViewUpdates(ViewUpdates callbacks){viewUpdates=callbacks;}
+    public void setPhotoMode(boolean enabled){photoMode=enabled;invalidate();}
+    public void updatePhoto(){notifyPhotoView();}
+    private void notifyPhotoView(){
+        if(viewUpdates==null||!enabled||!photoMode)return;
+        float[] matrix=worldCameraRotation();
+        float[] forward={-matrix[2],-matrix[5],-matrix[8]};
+        viewUpdates.changed(cameraLocation.clone(),forward,steps,uncertainty());
+    }
     public boolean hasStepSensor(){return stepSensor!=null;}
     public boolean hasDirectionSensor(){return orientationSensor!=null;}
     public int stepCount(){return steps;}
@@ -69,6 +81,7 @@ public final class MemoryView extends View implements SensorEventListener {
         if(sensors!=null&&orientationSensor!=null)
             sensors.registerListener(this,orientationSensor,SensorManager.SENSOR_DELAY_GAME);
         invalidate();
+        notifyPhotoView();
     }
     public void deactivate(){
         enabled=false;walking=false;
@@ -95,7 +108,7 @@ public final class MemoryView extends View implements SensorEventListener {
         steps=0;travel=0;baselineKnown=false;stepCap=false;lastStepNanos=0;
         cameraLocation=startLocation.clone();
         if(stepUpdates!=null)stepUpdates.changed(steps,travel,uncertainty());
-        invalidate();
+        invalidate();notifyPhotoView();
     }
     @Override public void onSensorChanged(SensorEvent e){
         if(!enabled)return;
@@ -106,7 +119,7 @@ public final class MemoryView extends View implements SensorEventListener {
                 sensorKnown=true;
             }
             if(System.currentTimeMillis()-lastRender>65){
-                lastRender=System.currentTimeMillis();invalidate();
+                lastRender=System.currentTimeMillis();invalidate();notifyPhotoView();
             }
             return;
         }
@@ -142,7 +155,7 @@ public final class MemoryView extends View implements SensorEventListener {
     public void turnVirtual(float dx,float dy){
         manualYaw+=dx*.004f;
         manualPitch=Math.max(-.85f,Math.min(.85f,manualPitch+dy*.004f));
-        invalidate();
+        invalidate();notifyPhotoView();
     }
     private static void multiply(float[] a,float[] b,float[] out){
         for(int row=0;row<3;row++)
@@ -197,11 +210,26 @@ public final class MemoryView extends View implements SensorEventListener {
     }
     @Override protected void onDraw(Canvas canvas){
         super.onDraw(canvas);
-        canvas.drawColor(0xff020b14);
+        if(!photoMode)canvas.drawColor(0xff020b14);
         if(!enabled)return;
         int w=getWidth(),h=getHeight();
         if(w<20||h<20)return;
         float[] orientation=worldCameraRotation();
+        if(photoMode){
+            // No invented 3D surfaces over the preserved camera photo.
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xffa9eaf6);
+            paint.setTextSize(dp(11));
+            canvas.drawText("RECORDED ROOM PHOTO | NOT LIVE CAMERA",dp(15),h*.65f,paint);
+            paint.setColor(0xffffc18a);
+            canvas.drawText(steps>0
+                ?String.format(Locale.US,"ESTIMATED: %d steps | %.1f m | +/- %.1f m drift",
+                    steps,travel,uncertainty())
+                :"PHOTO MEMORY | APPROXIMATE VIEWPOINT",
+                dp(15),h*.69f,paint);
+            drawOverhead(canvas,orientation);
+            return;
+        }
         float cx=w*.5f,cy=h*.5f,focal=w*.78f;
         int drawn=0;
         // True depth continuity segments: only connect 3D neighboring samples
