@@ -224,6 +224,29 @@ public class RiftNet {
         if(audioPlayer!=null)audioPlayer.close();
         if(audioConnection!=null)audioConnection.disconnect();
     }
+
+    volatile boolean autoFileSyncEnabled=true;
+    void startFileAutoSync(Consumer<String> notify) {
+        work.execute(()->{
+            java.util.HashSet<String> seen=new java.util.HashSet<>();
+            boolean primed=false;
+            while(running&&streaming&&autoFileSyncEnabled){
+                try{
+                    HttpsURLConnection c=open("/api/files/list","GET");
+                    c.setReadTimeout(10000);
+                    if(c.getResponseCode()!=200)throw new IOException("File auto-sync "+c.getResponseCode());
+                    JSONArray names=new JSONArray(body(c.getInputStream()));c.disconnect();
+                    for(int i=0;i<names.length();i++){
+                        String name=names.getString(i);
+                        if(primed&&!seen.contains(name))downloadFile(name,notify);
+                        seen.add(name);
+                    }
+                    primed=true;
+                }catch(Exception ignored){}
+                try{Thread.sleep(4000);}catch(InterruptedException ignored){break;}
+            }
+        });
+    }
     interface FileListListener { void complete(String[] files,String error); }
     void uploadFile(Uri uri, Consumer<String> feedback){
         work.execute(()->{
