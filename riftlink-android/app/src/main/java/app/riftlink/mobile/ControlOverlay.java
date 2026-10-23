@@ -191,12 +191,14 @@ public final class ControlOverlay extends View {
         switch(action){
           case MotionEvent.ACTION_DOWN:
           case MotionEvent.ACTION_POINTER_DOWN: {
-            if(!game && e.getPointerCount()==2 && action==MotionEvent.ACTION_POINTER_DOWN){
+            if(e.getPointerCount()==2 && action==MotionEvent.ACTION_POINTER_DOWN
+                 && !edit && fingers.isEmpty() && hit(x,y)==null){
                 pinching=true;
                 lastPinchDistance=(float)Math.hypot(e.getX(1)-e.getX(0),e.getY(1)-e.getY(0));
                 lastPinchCenterX=(e.getX(1)+e.getX(0))*.5f;
                 lastPinchCenterY=(e.getY(1)+e.getY(0))*.5f;
                 if(holdTask!=null)ui.removeCallbacks(holdTask);
+                if(mouseHeld){send.send("up","",cursorX,cursorY);mouseHeld=false;}
                 mousePointer=-1;return true;
             }
             KeyButton hit=hit(x,y);
@@ -247,7 +249,7 @@ public final class ControlOverlay extends View {
           case MotionEvent.ACTION_UP:
           case MotionEvent.ACTION_POINTER_UP:
           case MotionEvent.ACTION_CANCEL:{
-            if(pinching){if(e.getPointerCount()<=2){pinching=false;mousePointer=-1;}
+            if(pinching){if(e.getPointerCount()<=2){pinching=false;mousePointer=-1;lastPinchDistance=0;}
                 return true;}
             if(id==editingPointer){
                 editingPointer=-1;save();invalidate();
