@@ -16,7 +16,7 @@ public class MainActivity extends Activity {
     ControlOverlay controls;
     RiftNet net;
     StreamDecoder decoder;
-    TextView status; Button menuButton, fitButton; boolean hudHidden=false;
+    TextView status; Button menuButton, fitButton, keyboardButton; boolean hudHidden=false;
     EditText hostBox, pinBox;
     LinearLayout menu; ScrollView menuScroller; LiveKeyboardPanel liveKeyboard;
     float zoom=1f, panX=0f, panY=0f; boolean audioEnabled=true;
@@ -59,6 +59,14 @@ public class MainActivity extends Activity {
         fp.setMargins(0,dp(7),dp(64),0);
         root.addView(fitButton,fp);
         fitButton.setOnClickListener(v->{zoom=1f;panX=0;panY=0;fitVideo();});
+        keyboardButton=button("⌨");
+        FrameLayout.LayoutParams kp=new FrameLayout.LayoutParams(dp(53),dp(42),Gravity.TOP|Gravity.RIGHT);
+        kp.setMargins(0,dp(7),dp(120),0);
+        root.addView(keyboardButton,kp);
+        keyboardButton.setOnClickListener(v->{
+            if(liveKeyboard!=null && liveKeyboard.isShowing())liveKeyboard.hide();
+            else typeOnPC();
+        });
         createMenu();
         createConnectionPanel();
         liveKeyboard=new LiveKeyboardPanel(this,root,this::toast);
@@ -127,6 +135,7 @@ public class MainActivity extends Activity {
         menuScroller.setVisibility(View.GONE);
         if(menuButton!=null)menuButton.setVisibility(hudHidden?View.GONE:View.VISIBLE);
         if(fitButton!=null)fitButton.setVisibility(hudHidden?View.GONE:View.VISIBLE);
+        if(keyboardButton!=null)keyboardButton.setVisibility(hudHidden?View.GONE:View.VISIBLE);
         status.setVisibility(hudHidden?View.GONE:View.VISIBLE);
         controls.showButtons=!hudHidden;
         if(hudHidden && liveKeyboard!=null)liveKeyboard.hide();
