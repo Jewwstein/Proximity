@@ -74,6 +74,11 @@ public class MainActivity extends Activity {
         keyboardParams.setMargins(dp(6),dp(54),dp(6),0);
         root.addView(liveKeyboard,keyboardParams);
         setContentView(root);
+        // Already paired? Reconnect automatically when the app opens.
+        String previousHost=getPreferences(0).getString("host","");
+        if(!previousHost.isEmpty() && !getPreferences(0).getString("token-"+previousHost,"").isEmpty()){
+            ui.postDelayed(()->{if(net==null)beginConnect();},550);
+        }
     }
     void immersive(){
         getWindow().getDecorView().setSystemUiVisibility(
@@ -172,6 +177,7 @@ public class MainActivity extends Activity {
         final String chosen=host;
         getPreferences(0).edit().putString("host",chosen).apply();
         status.setText("Checking host certificate…");
+        if(net!=null)net.stop();
         net=new RiftNet(this,chosen);
         net.discoverFingerprint(new RiftNet.Discovery(){
             public void error(String e){runOnUiThread(()->{status.setText("Connection failed: "+e);toast(e);});}
@@ -188,6 +194,18 @@ public class MainActivity extends Activity {
                 });
             }
         });
+    }
+    void showExpiredPairing(){
+        // Do not endlessly retry streams with rejected credentials.
+        if(liveKeyboard!=null)liveKeyboard.hide();
+        stopDecoder();
+        connectionPanel.setVisibility(View.VISIBLE);
+        pinBox.setText("");
+        status.setText("Pairing expired — enter the PC PIN once");
+        toast("Host identity changed; pair once to save the new login.");
+    }
+    void closeKeyboardForGesture(){
+        if(liveKeyboard!=null && liveKeyboard.isShowing())liveKeyboard.hide();
     }
     void startAuthorizedConnection(){
         status.setText("Pairing and checking video…");
