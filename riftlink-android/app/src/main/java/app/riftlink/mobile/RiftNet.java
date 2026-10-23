@@ -28,7 +28,7 @@ public class RiftNet {
     volatile boolean inputConnected=false;
     long lastMove=0;
     interface Discovery{void error(String e);void fingerprint(String fp,boolean known);}
-    interface AuthListener{void complete(String token,int width,int height);void error(String e);}
+    interface AuthListener{void complete(String token,int width,int height,boolean gamepad);void error(String e);}
     RiftNet(MainActivity a,String h){activity=a;host=h;}
     static String hex(byte[] bytes){StringBuilder s=new StringBuilder();for(byte b:bytes)s.append(String.format(Locale.US,"%02X",b&255));return s.toString();}
     static String sha256(java.security.cert.Certificate c) throws Exception {
@@ -107,7 +107,7 @@ public class RiftNet {
                 }
                 int w=info.optInt("width"),h=info.optInt("height");
                 if(w<=0||h<=0)throw new Exception("PC video encoder is not ready; check RiftLink host.");
-                listener.complete(token,w,h);
+                listener.complete(token,w,h,info.optBoolean("xinput",false));
             }catch(Exception ex){listener.error(ex.getMessage());}
         });
     }
