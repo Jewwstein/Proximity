@@ -22,7 +22,9 @@ public class RiftNet {
     volatile String token="", fingerprint="";
     volatile SSLSocket inputSocket;
     volatile OutputStream inputOut;
-    volatile HttpsURLConnection streamConnection;
+    volatile HttpsURLConnection streamConnection, audioConnection;
+    volatile boolean audioStreaming=false;
+    volatile NativeAudio audioPlayer;
     volatile boolean inputConnected=false;
     long lastMove=0;
     interface Discovery{void error(String e);void fingerprint(String fp,boolean known);}
@@ -177,9 +179,37 @@ public class RiftNet {
             }
         });
     }
+    void startAudio(Consumer<String> notify){
+        stopAudio();
+        audioStreaming=true;
+        work.execute(()->{
+            while(running&&audioStreaming){
+                try{
+                    HttpsURLConnection c=open("/api/audio?token="+token,"GET");
+                    audioConnection=c;c.setReadTimeout(0);
+                    if(c.getResponseCode()!=200)throw new IOException("Audio HTTP "+c.getResponseCode());
+                    NativeAudio player=new NativeAudio(notify);audioPlayer=player;
+                    try(DataInputStream in=new DataInputStream(new BufferedInputStream(c.getInputStream(),65536))){
+                        player.play(in);
+                    }finally{player.close();c.disconnect();}
+                }catch(Exception ex){
+                    if(running&&audioStreaming)try{Thread.sleep(700);}catch(Exception ignored){}
+                }
+            }
+        });
+    }
+    void stopAudio(){
+        audioStreaming=false;
+        if(audioPlayer!=null)audioPlayer.close();
+        if(audioConnection!=null)audioConnection.disconnect();
+    }
     void stopStream(){streaming=false;if(streamConnection!=null)streamConnection.disconnect();}
     void stop(){
-        running=false;stopStream();input("up","",0.5f,0.5f);
+        input("up","",0.5f,0.5f);
+        input("releaseAllKeys","",0.5f,0.5f);
+        input("padReset","",0.5f,0.5f);
+        try{Thread.sleep(65);}catch(InterruptedException ignored){}
+        running=false;stopAudio();stopStream();
         try{if(inputSocket!=null)inputSocket.close();}catch(Exception ignored){}
         inputWork.shutdownNow();work.shutdownNow();
     }
