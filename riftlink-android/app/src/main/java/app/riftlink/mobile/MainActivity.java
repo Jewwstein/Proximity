@@ -94,6 +94,12 @@ public class MainActivity extends Activity {
         addMenu("Type on PC",this::typeOnPC);
         addMenu("Send file to PC",this::pickPhoneFile);
         addMenu("Download file from PC",this::showRemoteFiles);
+        addMenu("PC file auto-sync on/off",()->{
+            if(net!=null){net.autoFileSyncEnabled=!net.autoFileSyncEnabled;
+                if(net.autoFileSyncEnabled)net.startFileAutoSync(this::showTransferMessage);
+                toast(net.autoFileSyncEnabled?"PC file auto-sync ON":"PC file auto-sync OFF");
+            }menuScroller.setVisibility(View.GONE);
+        });
         addMenu("Gamepad / connection status",()->{toast(controls.useXInput?"Xbox virtual pad connected":"Gamepad not available on PC: using keyboard/mouse controls");menuScroller.setVisibility(View.GONE);});
         addMenu("Sound on / off",()->{audioEnabled=!audioEnabled;if(net!=null){net.stopAudio();if(audioEnabled)net.startAudio(s->runOnUiThread(()->status.setText(s)));}toast(audioEnabled?"Audio on":"Audio off");});
         addMenu("Reconnect",()->{menuScroller.setVisibility(View.GONE);reconnect();});
@@ -195,6 +201,7 @@ public class MainActivity extends Activity {
         decoder=new StreamDecoder(new Surface(video.getSurfaceTexture()),desktopWidth,desktopHeight,
             s->runOnUiThread(()->status.setText(s)));
         net.startStream(decoder, s->runOnUiThread(()->status.setText(s)));
+        net.startFileAutoSync(this::showTransferMessage);
         if(audioEnabled)net.startAudio(s->runOnUiThread(()->status.setText(s)));
     }
     void fitVideo(){
