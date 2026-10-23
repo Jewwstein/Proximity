@@ -16,7 +16,7 @@ public class MainActivity extends Activity {
     ControlOverlay controls;
     RiftNet net;
     StreamDecoder decoder;
-    TextView status; Button menuButton; boolean hudHidden=false;
+    TextView status; Button menuButton, fitButton; boolean hudHidden=false;
     EditText hostBox, pinBox;
     LinearLayout menu; ScrollView menuScroller;
     float zoom=1f, panX=0f, panY=0f; boolean audioEnabled=true;
@@ -54,6 +54,11 @@ public class MainActivity extends Activity {
         sp.setMargins(0,dp(7),dp(8),0);
         root.addView(settings,sp);
         settings.setOnClickListener(v->toggleMenu());
+        fitButton=button("Fit");
+        FrameLayout.LayoutParams fp=new FrameLayout.LayoutParams(dp(53),dp(42),Gravity.TOP|Gravity.RIGHT);
+        fp.setMargins(0,dp(7),dp(64),0);
+        root.addView(fitButton,fp);
+        fitButton.setOnClickListener(v->{zoom=1f;panX=0;panY=0;fitVideo();});
         createMenu();
         createConnectionPanel();
         setContentView(root);
@@ -111,6 +116,7 @@ public class MainActivity extends Activity {
         hudHidden=!hudHidden;
         menuScroller.setVisibility(View.GONE);
         if(menuButton!=null)menuButton.setVisibility(hudHidden?View.GONE:View.VISIBLE);
+        if(fitButton!=null)fitButton.setVisibility(hudHidden?View.GONE:View.VISIBLE);
         status.setVisibility(hudHidden?View.GONE:View.VISIBLE);
         controls.showButtons=!hudHidden;
         controls.invalidate();
@@ -123,7 +129,7 @@ public class MainActivity extends Activity {
         col.setPadding(dp(22),dp(20),dp(22),dp(20));col.setBackgroundColor(0xFF10233F);
         TextView title=new TextView(this);title.setText("RIFTLINK  •  NATIVE ANDROID"); title.setTextColor(Color.WHITE);title.setTextSize(20);
         col.addView(title);
-        TextView sub=new TextView(this);sub.setText("Enter the Wi-Fi IP shown by your Windows RiftLink host. Video uses Android's hardware decoder.");
+        TextView sub=new TextView(this);sub.setText("Enter your PC IP on Wi-Fi or your secure private VPN. The port is filled automatically.");
         sub.setTextColor(0xFFBBCAE4);sub.setTextSize(12);col.addView(sub);
         hostBox=new EditText(this);hostBox.setSingleLine(true);hostBox.setTextColor(Color.WHITE);
         hostBox.setHintTextColor(0xFF99B2CF);hostBox.setHint("PC IP only — no colon or port needed");
@@ -142,7 +148,7 @@ public class MainActivity extends Activity {
     void beginConnect(){
         String host=hostBox.getText().toString().trim().replace("https://","").replace("http://","");
         host=host.replaceAll("/.*$","").replaceAll(":38775$","");
-        if(!host.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}")){toast("Enter your PC's local IPv4 address");return;}
+        if(!host.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}")){toast("Enter your PC IPv4 address (Wi-Fi or VPN)");return;}
         final String chosen=host;
         getPreferences(0).edit().putString("host",chosen).apply();
         status.setText("Checking host certificate…");
