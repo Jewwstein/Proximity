@@ -11,7 +11,7 @@ import java.util.function.Consumer;
 
 final class StreamDecoder {
     private final Surface surface;
-    private final int width,height;
+    private int width,height;
     private final Consumer<String> status;
     private MediaCodec decoder;
     private long frames=0,lastReport=0,lastTimestamp=-1;
@@ -36,9 +36,14 @@ final class StreamDecoder {
         }
         return out;
     }
-    synchronized void frame(byte[] packet,boolean key,long micros) {
+    synchronized void frame(byte[] packet,boolean key,long micros,int frameWidth,int frameHeight) {
         if(closed)return;
         try{
+            if(frameWidth!=width || frameHeight!=height){
+                reset();
+                width=frameWidth;height=frameHeight;
+                status.accept("Adaptive video "+width+"×"+height);
+            }
             if(decoder==null){
                 if(!key)return;
                 byte[] sps=null,pps=null;
@@ -54,7 +59,9 @@ final class StreamDecoder {
                 lastReport=SystemClock.elapsedRealtime();lastTimestamp=-1;frames=0;
                 status.accept("H.264 decoder running • "+width+"×"+height);
             }
-            int idx=decoder.dequeueInputBuffer(5000);
+            // Very short dequeue avoids blocking the network reader behind a slow
+            // hardware decoder. Resync from a keyframe after a jam.
+            int idx=decoder.dequeueInputBuffer(1000);
             if(idx>=0){
                 ByteBuffer b=decoder.getInputBuffer(idx);
                 if(b!=null&&b.capacity()>=packet.length){
@@ -64,6 +71,7 @@ final class StreamDecoder {
                     decoder.queueInputBuffer(idx,0,packet.length,pts,0);
                 }else{
                     decoder.queueInputBuffer(idx,0,0,Math.max(0,micros),0);
+                    if(key)status.accept("Decoder buffer too small; awaiting next IDR");
                 }
             }
             MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
