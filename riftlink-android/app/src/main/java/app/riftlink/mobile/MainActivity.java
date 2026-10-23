@@ -16,7 +16,7 @@ public class MainActivity extends Activity {
     ControlOverlay controls;
     RiftNet net;
     StreamDecoder decoder;
-    TextView status;
+    TextView status; Button menuButton; boolean hudHidden=false;
     EditText hostBox, pinBox;
     LinearLayout menu;
     float zoom=1f, panX=0f, panY=0f; boolean audioEnabled=true;
@@ -49,7 +49,7 @@ public class MainActivity extends Activity {
         FrameLayout.LayoutParams sl=new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.LEFT);
         sl.setMargins(dp(8),dp(8),0,0);
         root.addView(status,sl);
-        Button settings=button("☰");
+        Button settings=button("☰");menuButton=settings;
         FrameLayout.LayoutParams sp=new FrameLayout.LayoutParams(dp(48),dp(42),Gravity.TOP|Gravity.RIGHT);
         sp.setMargins(0,dp(7),dp(8),0);
         root.addView(settings,sp);
@@ -76,7 +76,9 @@ public class MainActivity extends Activity {
         addMenu("Desktop / Controller",()->{controls.game=!controls.game;controls.invalidate(); menu.setVisibility(View.GONE);});
         addMenu("Edit control positions",()->{controls.edit=!controls.edit; controls.game=true;
             controls.invalidate(); menu.setVisibility(View.GONE);toast(controls.edit?"Drag buttons to move; tap to change key":"Layout saved");});
-        addMenu("Show / Hide buttons",()->{controls.showButtons=!controls.showButtons; controls.invalidate();menu.setVisibility(View.GONE);});
+        addMenu("Show / Hide buttons",()->{controls.showButtons=!controls.showButtons; controls.save(); controls.invalidate();menu.setVisibility(View.GONE);});
+        addMenu("Hide all UI (3 fingers to restore)",()->toggleHud());
+        addMenu("Show / Hide FPS text",()->{status.setVisibility(status.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);menu.setVisibility(View.GONE);});
         addMenu("Button opacity +",()->{controls.opacity=Math.min(240,controls.opacity+25); controls.save();controls.invalidate();});
         addMenu("Button opacity −",()->{controls.opacity=Math.max(35,controls.opacity-25); controls.save();controls.invalidate();});
         addMenu("Zoom +",()->{onPinch(1.25f);});
@@ -95,6 +97,15 @@ public class MainActivity extends Activity {
     void addMenu(String label,Runnable action){
         Button b=button(label);menu.addView(b,new LinearLayout.LayoutParams(-1,dp(44)));
         b.setOnClickListener(v->action.run());
+    }
+    void toggleHud(){
+        hudHidden=!hudHidden;
+        menu.setVisibility(View.GONE);
+        if(menuButton!=null)menuButton.setVisibility(hudHidden?View.GONE:View.VISIBLE);
+        status.setVisibility(hudHidden?View.GONE:View.VISIBLE);
+        controls.showButtons=!hudHidden;
+        controls.invalidate();
+        if(hudHidden)toast("Three fingers on screen to restore RiftLink controls");
     }
     void toggleMenu(){menu.setVisibility(menu.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);}
     void createConnectionPanel(){
