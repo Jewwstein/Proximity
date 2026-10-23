@@ -111,24 +111,39 @@ public class RiftNet {
             }catch(Exception ex){listener.error(ex.getMessage());}
         });
     }
-    void connectInputs(){
-        inputWork.execute(()->{
-            if(!running)return;
-            try{
-                SSLSocket s=(SSLSocket)context(false).getSocketFactory().createSocket(host,38775);
-                s.setTcpNoDelay(true);s.setSoTimeout(5000);s.startHandshake();
-                String key=Base64.getEncoder().encodeToString(UUID.randomUUID().toString().substring(0,16).getBytes("UTF-8"));
-                String req="GET /api/ws-input?token="+token+" HTTP/1.1\r\nHost: "+host+":38775\r\n"+
+    boolean connectSocket(){
+        if(!running)return false;
+        if(inputConnected&&inputOut!=null)return true;
+        try{
+            SSLSocket s=(SSLSocket)context(false).getSocketFactory().createSocket();
+            s.connect(new InetSocketAddress(host,38775),5000);
+            s.setTcpNoDelay(true);s.setSoTimeout(6000);s.startHandshake();
+            byte[] nonce=new byte[16];new SecureRandom().nextBytes(nonce);
+            String key=Base64.getEncoder().encodeToString(nonce);
+            String req="GET /api/ws-input?token="+token+" HTTP/1.1\r\nHost: "+host+":38775\r\n"+
                      "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: "+key+
                      "\r\nSec-WebSocket-Version: 13\r\n\r\n";
-                OutputStream out=s.getOutputStream();out.write(req.getBytes("UTF-8"));out.flush();
-                BufferedReader br=new BufferedReader(new InputStreamReader(s.getInputStream()));
-                String first=br.readLine();if(first==null||!first.contains("101"))throw new IOException("Input socket rejected: "+first);
-                String line;while((line=br.readLine())!=null&&!line.isEmpty()){}
-                s.setSoTimeout(0);inputSocket=s;inputOut=out;inputConnected=true;
-            }catch(Exception ex){inputConnected=false;activity.runOnUiThread(()->activity.status.setText("Input connection: "+ex.getMessage()));}
-        });
+            OutputStream out=s.getOutputStream();out.write(req.getBytes("UTF-8"));out.flush();
+            // Read headers directly; no buffered-reader read-ahead into WebSocket frames.
+            ByteArrayOutputStream head=new ByteArrayOutputStream();
+            int count=0,byteValue;
+            while(count<8192&&(byteValue=s.getInputStream().read())>=0){
+                head.write(byteValue);count++;
+                byte[] bytes=head.toByteArray();int n=bytes.length;
+                if(n>=4&&bytes[n-4]==13&&bytes[n-3]==10&&bytes[n-2]==13&&bytes[n-1]==10)break;
+            }
+            String headers=head.toString("UTF-8");
+            if(!headers.startsWith("HTTP/1.1 101"))throw new IOException("Windows controls rejected: "+headers.split("\r\n")[0]);
+            s.setSoTimeout(0);inputSocket=s;inputOut=out;inputConnected=true;
+            activity.runOnUiThread(()->activity.status.setText("RiftLink connected • trackpad ready"));
+            return true;
+        }catch(Exception ex){
+            inputConnected=false;
+            activity.runOnUiThread(()->activity.status.setText("Controls reconnect: "+ex.getMessage()));
+            return false;
+        }
     }
+    void connectInputs(){inputWork.execute(this::connectSocket);}
     void input(String action,String key,float x,float y){
         if(!running)return;
         if(action.equals("move")){
@@ -140,7 +155,7 @@ public class RiftNet {
            if(key!=null&&!key.isEmpty())obj.put("t",key);}catch(Exception ignored){}
         byte[] payload=obj.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
         inputWork.execute(()->{
-            if(!inputConnected||inputOut==null){if(running)connectInputs();return;}
+            if(!inputConnected||inputOut==null){if(!connectSocket())return;}
             try{
                 // RFC 6455 masked client text frame
                 byte[] mask=new byte[4];new SecureRandom().nextBytes(mask);
