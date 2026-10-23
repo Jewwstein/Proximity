@@ -1,6 +1,12 @@
 package app.riftlink.mobile;
 
 import android.app.*;
+import android.net.Uri;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
+import android.provider.MediaStore;
+import android.content.ContentValues;
+import android.os.Environment;
 import android.content.*;
 import android.os.*;
 import org.json.*;
@@ -217,6 +223,77 @@ public class RiftNet {
         audioStreaming=false;
         if(audioPlayer!=null)audioPlayer.close();
         if(audioConnection!=null)audioConnection.disconnect();
+    }
+    interface FileListListener { void complete(String[] files,String error); }
+    void uploadFile(Uri uri, Consumer<String> feedback){
+        work.execute(()->{
+            try{
+                String filename="phone-file";
+                try(Cursor cursor=activity.getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
+                    if(cursor!=null&&cursor.moveToFirst())filename=cursor.getString(0);
+                }
+                if(filename==null||filename.isEmpty())filename="phone-file";
+                HttpsURLConnection c=open("/api/files/upload?name="+URLEncoder.encode(filename,"UTF-8"),"POST");
+                c.setDoOutput(true);c.setChunkedStreamingMode(65536);
+                c.setRequestProperty("Content-Type","application/octet-stream");
+                c.setReadTimeout(90000);
+                long copied=0;
+                try(InputStream in=activity.getContentResolver().openInputStream(uri);
+                    OutputStream out=c.getOutputStream()){
+                    if(in==null)throw new IOException("Selected file not accessible");
+                    byte[] buf=new byte[64*1024];int n;
+                    while((n=in.read(buf))>=0){
+                        copied+=n;
+                        if(copied>512L*1024*1024)throw new IOException("Maximum transfer size is 512 MB");
+                        out.write(buf,0,n);
+                    }
+                }
+                if(c.getResponseCode()!=200)throw new IOException("Upload rejected, HTTP "+c.getResponseCode());
+                c.disconnect();
+                feedback.accept("Sent "+filename+" to PC desktop / RiftLink Exchange");
+            }catch(Exception ex){feedback.accept("File upload failed: "+ex.getMessage());}
+        });
+    }
+    void listFiles(FileListListener callback){
+        work.execute(()->{
+            try{
+                HttpsURLConnection c=open("/api/files/list","GET");
+                if(c.getResponseCode()!=200)throw new IOException("PC file list unavailable, HTTP "+c.getResponseCode());
+                JSONArray arr=new JSONArray(body(c.getInputStream()));c.disconnect();
+                String[] files=new String[arr.length()];
+                for(int i=0;i<files.length;i++)files[i]=arr.getString(i);
+                callback.complete(files,null);
+            }catch(Exception ex){callback.complete(new String[0],ex.getMessage());}
+        });
+    }
+    void downloadFile(String filename,Consumer<String> feedback){
+        work.execute(()->{
+            Uri uri=null;
+            try{
+                HttpsURLConnection c=open("/api/files/download?name="+URLEncoder.encode(filename,"UTF-8"),"GET");
+                c.setReadTimeout(90000);
+                if(c.getResponseCode()!=200)throw new IOException("Download HTTP "+c.getResponseCode());
+                ContentValues values=new ContentValues();
+                values.put(MediaStore.Downloads.DISPLAY_NAME,filename);
+                values.put(MediaStore.Downloads.MIME_TYPE,"application/octet-stream");
+                values.put(MediaStore.Downloads.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS+"/RiftLink");
+                values.put(MediaStore.Downloads.IS_PENDING,1);
+                uri=activity.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);
+                if(uri==null)throw new IOException("Cannot create Downloads/RiftLink folder");
+                try(InputStream in=c.getInputStream();OutputStream out=activity.getContentResolver().openOutputStream(uri)){
+                    if(out==null)throw new IOException("Cannot write to phone Downloads");
+                    byte[] buf=new byte[64*1024];int n;
+                    while((n=in.read(buf))!=-1){out.write(buf,0,n);}
+                }
+                c.disconnect();
+                ContentValues done=new ContentValues();done.put(MediaStore.Downloads.IS_PENDING,0);
+                activity.getContentResolver().update(uri,done,null,null);
+                feedback.accept("Downloaded "+filename+" to Downloads / RiftLink");
+            }catch(Exception ex){
+                if(uri!=null)activity.getContentResolver().delete(uri,null,null);
+                feedback.accept("Download failed: "+ex.getMessage());
+            }
+        });
     }
     void stopStream(){streaming=false;if(streamConnection!=null)streamConnection.disconnect();}
     void stop(){
