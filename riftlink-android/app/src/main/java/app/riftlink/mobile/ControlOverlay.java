@@ -183,6 +183,11 @@ public final class ControlOverlay extends View {
     @Override public boolean onTouchEvent(android.view.MotionEvent e){
         int action=e.getActionMasked(),index=e.getActionIndex(),id=e.getPointerId(index);
         float x=e.getX(index),y=e.getY(index);
+        if(e.getPointerCount()>=3 && action==MotionEvent.ACTION_POINTER_DOWN){
+            cancelAll();
+            ((MainActivity)getContext()).toggleHud();
+            return true;
+        }
         switch(action){
           case MotionEvent.ACTION_DOWN:
           case MotionEvent.ACTION_POINTER_DOWN: {
