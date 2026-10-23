@@ -232,7 +232,14 @@ public class MainActivity extends Activity {
         stopDecoder();
         decoder=new StreamDecoder(new Surface(video.getSurfaceTexture()),desktopWidth,desktopHeight,
             s->runOnUiThread(()->status.setText(s)));
-        net.startStream(decoder, s->runOnUiThread(()->status.setText(s)));
+        net.startStream(decoder,
+            message->runOnUiThread(()->status.setText(message)),
+            size->runOnUiThread(()->{
+                if(desktopWidth!=size[0]||desktopHeight!=size[1]){
+                    desktopWidth=size[0];desktopHeight=size[1];
+                    fitVideo();
+                }
+            }));
         net.startFileAutoSync(this::showTransferMessage);
         if(audioEnabled)net.startAudio(s->runOnUiThread(()->status.setText(s)));
     }
