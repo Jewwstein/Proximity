@@ -149,12 +149,12 @@ public class MainActivity extends Activity {
         String savedHost=hostBox.getText().toString().trim();
         String savedToken=getPreferences(0).getString("token-"+net.host,"");
         net.authenticate(pin,savedToken,new RiftNet.AuthListener(){
-            public void complete(String token,int w,int h){
+            public void complete(String token,int w,int h,boolean gamepad){
                 runOnUiThread(()->{
                     desktopWidth=w;desktopHeight=h;
                     getPreferences(0).edit().putString("token-"+net.host,token).apply();
                     connectionPanel.setVisibility(View.GONE);
-                    controls.reset();zoom=1;panX=0;panY=0;fitVideo();status.setText("Connecting video…");
+                    controls.reset();controls.useXInput=gamepad;zoom=1;panX=0;panY=0;fitVideo();status.setText("Connecting video…");
                     net.connectInputs();
                     startVideo();
                 });
