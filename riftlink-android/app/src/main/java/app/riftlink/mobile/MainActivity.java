@@ -19,7 +19,7 @@ public class MainActivity extends Activity {
     TextView status;
     EditText hostBox, pinBox;
     LinearLayout menu;
-    float zoom=1f;
+    float zoom=1f, panX=0f, panY=0f; boolean audioEnabled=true;
     int desktopWidth=1920,desktopHeight=1080;
     Handler ui = new Handler(Looper.getMainLooper());
 
@@ -79,9 +79,13 @@ public class MainActivity extends Activity {
         addMenu("Show / Hide buttons",()->{controls.showButtons=!controls.showButtons; controls.invalidate();menu.setVisibility(View.GONE);});
         addMenu("Button opacity +",()->{controls.opacity=Math.min(240,controls.opacity+25); controls.save();controls.invalidate();});
         addMenu("Button opacity −",()->{controls.opacity=Math.max(35,controls.opacity-25); controls.save();controls.invalidate();});
-        addMenu("Zoom +",()->{zoom=Math.min(4f,zoom*1.25f);fitVideo();});
-        addMenu("Zoom −",()->{zoom=Math.max(1f,zoom/1.25f);fitVideo();});
-        addMenu("Fit screen",()->{zoom=1f;fitVideo();menu.setVisibility(View.GONE);});
+        addMenu("Zoom +",()->{onPinch(1.25f);});
+        addMenu("Zoom −",()->{onPinch(.8f);});
+        addMenu("Fit screen",()->{zoom=1f;panX=0;panY=0;fitVideo();menu.setVisibility(View.GONE);});
+        addMenu("Enlarge selected control",()->controls.resizeSelected(1.18f));
+        addMenu("Shrink selected control",()->controls.resizeSelected(.84f));
+        addMenu("Type on PC",this::typeOnPC);
+        addMenu("Sound on / off",()->{audioEnabled=!audioEnabled;if(net!=null){net.stopAudio();if(audioEnabled)net.startAudio(s->runOnUiThread(()->status.setText(s)));}toast(audioEnabled?"Audio on":"Audio off");});
         addMenu("Reconnect",()->{menu.setVisibility(View.GONE);reconnect();});
         addMenu("Disconnect",()->{menu.setVisibility(View.GONE);stopVideo();connectionPanel.setVisibility(View.VISIBLE);});
         FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(dp(220),-2,Gravity.TOP|Gravity.RIGHT);
@@ -102,8 +106,8 @@ public class MainActivity extends Activity {
         TextView sub=new TextView(this);sub.setText("Enter the Wi-Fi IP shown by your Windows RiftLink host. Video uses Android's hardware decoder.");
         sub.setTextColor(0xFFBBCAE4);sub.setTextSize(12);col.addView(sub);
         hostBox=new EditText(this);hostBox.setSingleLine(true);hostBox.setTextColor(Color.WHITE);
-        hostBox.setHintTextColor(0xFF99B2CF);hostBox.setHint("PC IP, e.g. 192.168.1.50");
-        hostBox.setInputType(android.text.InputType.TYPE_CLASS_PHONE);
+        hostBox.setHintTextColor(0xFF99B2CF);hostBox.setHint("PC IP only — no colon or port needed");
+        hostBox.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
         hostBox.setText(getPreferences(0).getString("host",""));
         col.addView(hostBox);
         pinBox=new EditText(this);pinBox.setSingleLine(true);pinBox.setTextColor(Color.WHITE);
@@ -150,7 +154,7 @@ public class MainActivity extends Activity {
                     desktopWidth=w;desktopHeight=h;
                     getPreferences(0).edit().putString("token-"+net.host,token).apply();
                     connectionPanel.setVisibility(View.GONE);
-                    controls.reset();zoom=1;fitVideo();status.setText("Connecting video…");
+                    controls.reset();zoom=1;panX=0;panY=0;fitVideo();status.setText("Connecting video…");
                     net.connectInputs();
                     startVideo();
                 });
@@ -165,6 +169,7 @@ public class MainActivity extends Activity {
         decoder=new StreamDecoder(new Surface(video.getSurfaceTexture()),desktopWidth,desktopHeight,
             s->runOnUiThread(()->status.setText(s)));
         net.startStream(decoder, s->runOnUiThread(()->status.setText(s)));
+        if(audioEnabled)net.startAudio(s->runOnUiThread(()->status.setText(s)));
     }
     void fitVideo(){
         if(video==null||video.getWidth()==0)return;
@@ -174,8 +179,28 @@ public class MainActivity extends Activity {
         float drawnW=viewW,drawnH=viewH;
         if(contentAspect>viewAspect)drawnH=viewW/contentAspect;else drawnW=viewH*contentAspect;
         Matrix m=new Matrix();m.setScale((drawnW/viewW)*zoom,(drawnH/viewH)*zoom,viewW/2f,viewH/2f);
+        m.postTranslate(panX,panY);
         video.setTransform(m);
         if(controls!=null){controls.videoBoxW=drawnW*zoom;controls.videoBoxH=drawnH*zoom;}
+    }
+    void onPinch(float factor){
+        float newZoom=Math.max(1f,Math.min(5f,zoom*factor));
+        if(newZoom==1f){panX=0;panY=0;}zoom=newZoom;fitVideo();
+    }
+    void panZoom(float dx,float dy){
+        if(zoom<=1f)return;
+        panX=Math.max(-video.getWidth()*(zoom-1)/2f,Math.min(video.getWidth()*(zoom-1)/2f,panX+dx));
+        panY=Math.max(-video.getHeight()*(zoom-1)/2f,Math.min(video.getHeight()*(zoom-1)/2f,panY+dy));
+        fitVideo();
+    }
+    void typeOnPC(){
+        EditText box=new EditText(this);
+        box.setSingleLine(false);box.setTextColor(Color.BLACK);box.setHint("Text to type on Windows");
+        new AlertDialog.Builder(this).setTitle("Windows keyboard").setView(box)
+            .setPositiveButton("Send",(dialog,which)->{
+               if(net!=null)net.input("text",box.getText().toString(),.5f,.5f);
+               menu.setVisibility(View.GONE);
+            }).setNegativeButton("Cancel",null).show();
     }
     void reconnect(){if(net!=null){stopDecoder();net.stopStream();startVideo();}}
     void stopDecoder(){if(decoder!=null){decoder.close();decoder=null;}}
