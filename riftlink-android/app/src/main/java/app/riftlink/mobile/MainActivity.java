@@ -18,7 +18,7 @@ public class MainActivity extends Activity {
     StreamDecoder decoder;
     TextView status; Button menuButton; boolean hudHidden=false;
     EditText hostBox, pinBox;
-    LinearLayout menu;
+    LinearLayout menu; ScrollView menuScroller;
     float zoom=1f, panX=0f, panY=0f; boolean audioEnabled=true;
     int desktopWidth=1920,desktopHeight=1080;
     Handler ui = new Handler(Looper.getMainLooper());
@@ -73,26 +73,35 @@ public class MainActivity extends Activity {
     void createMenu(){
         menu=new LinearLayout(this);menu.setOrientation(LinearLayout.VERTICAL);
         menu.setPadding(dp(6),dp(6),dp(6),dp(6));menu.setBackgroundColor(0xEA071626);
-        addMenu("Desktop / Controller",()->{controls.game=!controls.game;controls.invalidate(); menu.setVisibility(View.GONE);});
+        addMenu("Desktop / Controller",()->{controls.game=!controls.game;controls.invalidate(); menuScroller.setVisibility(View.GONE);});
         addMenu("Edit control positions",()->{controls.edit=!controls.edit; controls.game=true;
-            controls.invalidate(); menu.setVisibility(View.GONE);toast(controls.edit?"Drag buttons to move; tap to change key":"Layout saved");});
-        addMenu("Show / Hide buttons",()->{controls.showButtons=!controls.showButtons; controls.save(); controls.invalidate();menu.setVisibility(View.GONE);});
+            controls.invalidate(); menuScroller.setVisibility(View.GONE);toast(controls.edit?"Drag buttons to move; tap to change key":"Layout saved");});
+        addMenu("Show / Hide buttons",()->{controls.showButtons=!controls.showButtons; controls.save(); controls.invalidate();menuScroller.setVisibility(View.GONE);});
         addMenu("Hide all UI (3 fingers to restore)",()->toggleHud());
-        addMenu("Show / Hide FPS text",()->{status.setVisibility(status.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);menu.setVisibility(View.GONE);});
+        addMenu("Show / Hide FPS text",()->{status.setVisibility(status.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);menuScroller.setVisibility(View.GONE);});
         addMenu("Button opacity +",()->{controls.opacity=Math.min(240,controls.opacity+25); controls.save();controls.invalidate();});
         addMenu("Button opacity −",()->{controls.opacity=Math.max(35,controls.opacity-25); controls.save();controls.invalidate();});
         addMenu("Zoom +",()->{onPinch(1.25f);});
         addMenu("Zoom −",()->{onPinch(.8f);});
-        addMenu("Fit screen",()->{zoom=1f;panX=0;panY=0;fitVideo();menu.setVisibility(View.GONE);});
+        addMenu("Fit screen",()->{zoom=1f;panX=0;panY=0;fitVideo();menuScroller.setVisibility(View.GONE);});
         addMenu("Enlarge selected control",()->controls.resizeSelected(1.18f));
         addMenu("Shrink selected control",()->controls.resizeSelected(.84f));
         addMenu("Type on PC",this::typeOnPC);
+        addMenu("Send file to PC",this::pickPhoneFile);
+        addMenu("Download file from PC",this::showRemoteFiles);
+        addMenu("Gamepad / connection status",()->{toast(controls.useXInput?"Xbox virtual pad connected":"Gamepad not available on PC: using keyboard/mouse controls");menuScroller.setVisibility(View.GONE);});
         addMenu("Sound on / off",()->{audioEnabled=!audioEnabled;if(net!=null){net.stopAudio();if(audioEnabled)net.startAudio(s->runOnUiThread(()->status.setText(s)));}toast(audioEnabled?"Audio on":"Audio off");});
-        addMenu("Reconnect",()->{menu.setVisibility(View.GONE);reconnect();});
-        addMenu("Disconnect",()->{menu.setVisibility(View.GONE);stopVideo();connectionPanel.setVisibility(View.VISIBLE);});
-        FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(dp(220),-2,Gravity.TOP|Gravity.RIGHT);
+        addMenu("Reconnect",()->{menuScroller.setVisibility(View.GONE);reconnect();});
+        addMenu("Disconnect",()->{menuScroller.setVisibility(View.GONE);stopVideo();connectionPanel.setVisibility(View.VISIBLE);});
+        menuScroller=new ScrollView(this);
+        menuScroller.setFillViewport(false);
+        menuScroller.setVerticalScrollBarEnabled(true);
+        menuScroller.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        menuScroller.addView(menu,new ScrollView.LayoutParams(-1,-2));
+        FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(dp(244),
+            Math.max(dp(160),getResources().getDisplayMetrics().heightPixels-dp(62)),Gravity.TOP|Gravity.RIGHT);
         p.setMargins(0,dp(53),dp(8),0);
-        root.addView(menu,p);menu.setVisibility(View.GONE);
+        root.addView(menuScroller,p);menuScroller.setVisibility(View.GONE);
     }
     void addMenu(String label,Runnable action){
         Button b=button(label);menu.addView(b,new LinearLayout.LayoutParams(-1,dp(44)));
@@ -100,14 +109,14 @@ public class MainActivity extends Activity {
     }
     void toggleHud(){
         hudHidden=!hudHidden;
-        menu.setVisibility(View.GONE);
+        menuScroller.setVisibility(View.GONE);
         if(menuButton!=null)menuButton.setVisibility(hudHidden?View.GONE:View.VISIBLE);
         status.setVisibility(hudHidden?View.GONE:View.VISIBLE);
         controls.showButtons=!hudHidden;
         controls.invalidate();
         if(hudHidden)toast("Three fingers on screen to restore RiftLink controls");
     }
-    void toggleMenu(){menu.setVisibility(menu.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);}
+    void toggleMenu(){menuScroller.setVisibility(menuScroller.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);}
     void createConnectionPanel(){
         connectionPanel=new FrameLayout(this);connectionPanel.setBackgroundColor(0xF5071220);
         LinearLayout col=new LinearLayout(this);col.setOrientation(LinearLayout.VERTICAL);
@@ -211,8 +220,35 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("Windows keyboard").setView(box)
             .setPositiveButton("Send",(dialog,which)->{
                if(net!=null)net.input("text",box.getText().toString(),.5f,.5f);
-               menu.setVisibility(View.GONE);
+               menuScroller.setVisibility(View.GONE);
             }).setNegativeButton("Cancel",null).show();
+    }
+    static final int PICK_RIFTLINK_FILE=1297;
+    void pickPhoneFile(){
+        menuScroller.setVisibility(View.GONE);
+        if(net==null){toast("Connect to PC first");return;}
+        Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        pick.setType("*/*");
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(pick,PICK_RIFTLINK_FILE);
+    }
+    @Override protected void onActivityResult(int request,int result,Intent data){
+        super.onActivityResult(request,result,data);
+        if(request==PICK_RIFTLINK_FILE&&result==RESULT_OK&&data!=null&&data.getData()!=null){
+            net.uploadFile(data.getData(),this::showTransferMessage);
+        }
+    }
+    void showTransferMessage(String message){runOnUiThread(()->{status.setText(message);toast(message);});}
+    void showRemoteFiles(){
+        menuScroller.setVisibility(View.GONE);
+        if(net==null){toast("Connect to PC first");return;}
+        net.listFiles((names,error)->runOnUiThread(()->{
+            if(error!=null){toast(error);return;}
+            if(names.length==0){toast("No files in PC desktop RiftLink Exchange folder");return;}
+            new AlertDialog.Builder(this).setTitle("Download from PC")
+                .setItems(names,(dialog,index)->net.downloadFile(names[index],this::showTransferMessage))
+                .setNegativeButton("Cancel",null).show();
+        }));
     }
     void reconnect(){if(net!=null){stopDecoder();net.stopStream();startVideo();}}
     void stopDecoder(){if(decoder!=null){decoder.close();decoder=null;}}
@@ -225,6 +261,6 @@ public class MainActivity extends Activity {
             .setNegativeButton("Cancel",null).show();
     }
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
-    @Override public void onBackPressed(){if(menu.getVisibility()==View.VISIBLE){menu.setVisibility(View.GONE);}else toggleMenu();}
+    @Override public void onBackPressed(){if(menuScroller.getVisibility()==View.VISIBLE){menuScroller.setVisibility(View.GONE);}else toggleMenu();}
     @Override protected void onDestroy(){stopVideo();super.onDestroy();}
 }
