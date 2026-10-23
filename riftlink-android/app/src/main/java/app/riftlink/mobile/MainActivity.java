@@ -18,7 +18,7 @@ public class MainActivity extends Activity {
     StreamDecoder decoder;
     TextView status; Button menuButton, fitButton; boolean hudHidden=false;
     EditText hostBox, pinBox;
-    LinearLayout menu; ScrollView menuScroller;
+    LinearLayout menu; ScrollView menuScroller; LiveKeyboardPanel liveKeyboard;
     float zoom=1f, panX=0f, panY=0f; boolean audioEnabled=true;
     int desktopWidth=1920,desktopHeight=1080;
     Handler ui = new Handler(Looper.getMainLooper());
@@ -61,6 +61,10 @@ public class MainActivity extends Activity {
         fitButton.setOnClickListener(v->{zoom=1f;panX=0;panY=0;fitVideo();});
         createMenu();
         createConnectionPanel();
+        liveKeyboard=new LiveKeyboardPanel(this,root,this::toast);
+        FrameLayout.LayoutParams keyboardParams=new FrameLayout.LayoutParams(-1,-2,Gravity.TOP);
+        keyboardParams.setMargins(dp(6),dp(54),dp(6),0);
+        root.addView(liveKeyboard,keyboardParams);
         setContentView(root);
     }
     void immersive(){
@@ -91,7 +95,7 @@ public class MainActivity extends Activity {
         addMenu("Fit screen",()->{zoom=1f;panX=0;panY=0;fitVideo();menuScroller.setVisibility(View.GONE);});
         addMenu("Enlarge selected control",()->controls.resizeSelected(1.18f));
         addMenu("Shrink selected control",()->controls.resizeSelected(.84f));
-        addMenu("Type on PC",this::typeOnPC);
+        addMenu("Live keyboard • instant typing",this::typeOnPC);
         addMenu("Send file to PC",this::pickPhoneFile);
         addMenu("Download file from PC",this::showRemoteFiles);
         addMenu("PC file auto-sync on/off",()->{
@@ -125,6 +129,7 @@ public class MainActivity extends Activity {
         if(fitButton!=null)fitButton.setVisibility(hudHidden?View.GONE:View.VISIBLE);
         status.setVisibility(hudHidden?View.GONE:View.VISIBLE);
         controls.showButtons=!hudHidden;
+        if(hudHidden && liveKeyboard!=null)liveKeyboard.hide();
         controls.invalidate();
         if(hudHidden)toast("Three fingers on screen to restore RiftLink controls");
     }
@@ -228,13 +233,9 @@ public class MainActivity extends Activity {
         fitVideo();
     }
     void typeOnPC(){
-        EditText box=new EditText(this);
-        box.setSingleLine(false);box.setTextColor(Color.BLACK);box.setHint("Text to type on Windows");
-        new AlertDialog.Builder(this).setTitle("Windows keyboard").setView(box)
-            .setPositiveButton("Send",(dialog,which)->{
-               if(net!=null)net.input("text",box.getText().toString(),.5f,.5f);
-               menuScroller.setVisibility(View.GONE);
-            }).setNegativeButton("Cancel",null).show();
+        menuScroller.setVisibility(View.GONE);
+        if(net==null){toast("Connect to PC first");return;}
+        if(liveKeyboard!=null)liveKeyboard.show();
     }
     static final int PICK_RIFTLINK_FILE=1297;
     void pickPhoneFile(){
@@ -265,7 +266,7 @@ public class MainActivity extends Activity {
     }
     void reconnect(){if(net!=null){stopDecoder();net.stopStream();startVideo();}}
     void stopDecoder(){if(decoder!=null){decoder.close();decoder=null;}}
-    void stopVideo(){stopDecoder();if(net!=null){net.stop();net=null;}}
+    void stopVideo(){if(liveKeyboard!=null)liveKeyboard.hide();stopDecoder();if(net!=null){net.stop();net=null;}}
     void editMapping(String name,String current){
         EditText key=new EditText(this);key.setSingleLine(true);key.setText(current);
         new AlertDialog.Builder(this).setTitle("Key for "+name)
@@ -274,6 +275,10 @@ public class MainActivity extends Activity {
             .setNegativeButton("Cancel",null).show();
     }
     void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
-    @Override public void onBackPressed(){if(menuScroller.getVisibility()==View.VISIBLE){menuScroller.setVisibility(View.GONE);}else toggleMenu();}
+    @Override public void onBackPressed(){
+        if(liveKeyboard!=null && liveKeyboard.isShowing()){liveKeyboard.hide();return;}
+        if(menuScroller.getVisibility()==View.VISIBLE){menuScroller.setVisibility(View.GONE);}
+        else toggleMenu();
+    }
     @Override protected void onDestroy(){stopVideo();super.onDestroy();}
 }
