@@ -181,7 +181,8 @@ public class MainActivity extends Activity {
         Matrix m=new Matrix();m.setScale((drawnW/viewW)*zoom,(drawnH/viewH)*zoom,viewW/2f,viewH/2f);
         m.postTranslate(panX,panY);
         video.setTransform(m);
-        if(controls!=null){controls.videoBoxW=drawnW*zoom;controls.videoBoxH=drawnH*zoom;}
+        if(controls!=null){controls.videoBoxW=drawnW*zoom;controls.videoBoxH=drawnH*zoom;
+            controls.cursorOffsetX=panX;controls.cursorOffsetY=panY;controls.invalidate();}
     }
     void onPinch(float factor){
         float newZoom=Math.max(1f,Math.min(5f,zoom*factor));
