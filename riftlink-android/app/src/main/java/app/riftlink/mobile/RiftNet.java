@@ -25,6 +25,7 @@ public class RiftNet {
     final ExecutorService work=Executors.newCachedThreadPool();
     final ExecutorService inputWork=Executors.newSingleThreadExecutor();
     volatile boolean running=true, streaming=false;
+    final java.util.concurrent.atomic.AtomicBoolean authErrorShown=new java.util.concurrent.atomic.AtomicBoolean(false);
     volatile String token="", fingerprint="";
     volatile SSLSocket inputSocket;
     volatile OutputStream inputOut;
@@ -94,27 +95,71 @@ public class RiftNet {
     void authenticate(String pin,String saved,AuthListener listener){
         work.execute(()->{
             try{
-                token=saved;
+                token=saved==null?"":saved;
                 JSONObject info=null;
                 if(!token.isEmpty()){
-                    try{HttpsURLConnection c=open("/api/info","GET");
-                        if(c.getResponseCode()==200)info=new JSONObject(body(c.getInputStream()));c.disconnect();
-                    }catch(Exception ignored){}
+                    HttpsURLConnection check=null;
+                    try {
+                        check=open("/api/info","GET");
+                        int code=check.getResponseCode();
+                        if(code==200) info=new JSONObject(body(check.getInputStream()));
+                        if(code==401){
+                            token="";
+                            activity.getPreferences(0).edit().remove("token-"+host).apply();
+                        }else if(code!=200){
+                            throw new IOException("PC responded HTTP "+code);
+                        }
+                    } catch(IOException transientError){
+                        // Never throw away a previously saved token for a transient network error.
+                        throw transientError;
+                    } finally {if(check!=null)check.disconnect();}
                 }
                 if(info==null){
-                    if(!pin.matches("[0-9]{6}"))throw new Exception("Enter the six-digit pairing PIN shown by RiftLink on your PC.");
-                    HttpsURLConnection c=open("/api/pair","POST");c.setDoOutput(true);
-                    c.setRequestProperty("Content-Type","application/json");
-                    try(OutputStream o=c.getOutputStream()){o.write(new JSONObject().put("pin",pin).toString().getBytes("UTF-8"));}
-                    if(c.getResponseCode()!=200)throw new Exception("Pairing rejected (HTTP "+c.getResponseCode()+")");
-                    token=new JSONObject(body(c.getInputStream())).getString("token");c.disconnect();
-                    c=open("/api/info","GET");if(c.getResponseCode()!=200)throw new Exception("PC info unavailable");
-                    info=new JSONObject(body(c.getInputStream()));c.disconnect();
+                    if(!pin.matches("[0-9]{6}")){
+                        throw new Exception("Pairing expired. Enter the PC PIN once; future restarts reconnect automatically.");
+                    }
+                    HttpsURLConnection connection=open("/api/pair","POST");
+                    try {
+                        connection.setDoOutput(true);
+                        connection.setRequestProperty("Content-Type","application/json");
+                        try(OutputStream out=connection.getOutputStream()){
+                            out.write(new JSONObject().put("pin",pin).toString().getBytes("UTF-8"));
+                        }
+                        int result=connection.getResponseCode();
+                        if(result!=200) throw new IOException("Pairing rejected (HTTP "+result+")");
+                        token=new JSONObject(body(connection.getInputStream())).getString("token");
+                    }finally {connection.disconnect();}
+                    HttpsURLConnection check=open("/api/info","GET");
+                    try {
+                        if(check.getResponseCode()!=200)throw new IOException("PC rejected new pairing");
+                        info=new JSONObject(body(check.getInputStream()));
+                    } finally {check.disconnect();}
                 }
                 int w=info.optInt("width"),h=info.optInt("height");
-                if(w<=0||h<=0)throw new Exception("PC video encoder is not ready; check RiftLink host.");
+                // GPU can be initializing immediately after the Windows GUI launches it.
+                for(int retry=0;(w<=0||h<=0)&&retry<12;retry++){
+                    Thread.sleep(350);
+                    HttpsURLConnection check=open("/api/info","GET");
+                    try{
+                        if(check.getResponseCode()==200) info=new JSONObject(body(check.getInputStream()));
+                    }finally{check.disconnect();}
+                    w=info.optInt("width");h=info.optInt("height");
+                }
+                if(w<=0||h<=0) throw new IOException("PC video engine is still starting; tap Connect again.");
+                authErrorShown.set(false);
                 listener.complete(token,w,h,info.optBoolean("xinput",false));
-            }catch(Exception ex){listener.error(ex.getMessage());}
+            }catch(Exception ex){listener.error(ex.getMessage()==null?ex.toString():ex.getMessage());}
+        });
+    }
+    void onUnauthorized(){
+        if(!authErrorShown.compareAndSet(false,true))return;
+        streaming=false;
+        audioStreaming=false;
+        activity.getPreferences(0).edit().remove("token-"+host).apply();
+        activity.runOnUiThread(()->{
+            if(activity.net==this){
+                activity.showExpiredPairing();
+            }
         });
     }
     boolean connectSocket(){
@@ -181,7 +226,9 @@ public class RiftNet {
                 try{
                     HttpsURLConnection c=open("/api/stream?token="+token,"GET");
                     c.setReadTimeout(0);streamConnection=c;
-                    if(c.getResponseCode()!=200)throw new IOException("Stream HTTP "+c.getResponseCode());
+                    int streamCode=c.getResponseCode();
+                    if(streamCode==401){onUnauthorized();return;}
+                    if(streamCode!=200)throw new IOException("Stream HTTP "+streamCode);
                     try(DataInputStream in=new DataInputStream(new BufferedInputStream(c.getInputStream(),1024*256))){
                         while(running&&streaming){
                             int len=in.readInt();boolean key=in.readUnsignedByte()==1;long micros=in.readLong();
@@ -208,7 +255,9 @@ public class RiftNet {
                 try{
                     HttpsURLConnection c=open("/api/audio?token="+token,"GET");
                     audioConnection=c;c.setReadTimeout(0);
-                    if(c.getResponseCode()!=200)throw new IOException("Audio HTTP "+c.getResponseCode());
+                    int audioCode=c.getResponseCode();
+                    if(audioCode==401){onUnauthorized();return;}
+                    if(audioCode!=200)throw new IOException("Audio HTTP "+audioCode);
                     NativeAudio player=new NativeAudio(notify);audioPlayer=player;
                     try(DataInputStream in=new DataInputStream(new BufferedInputStream(c.getInputStream(),65536))){
                         player.play(in);
