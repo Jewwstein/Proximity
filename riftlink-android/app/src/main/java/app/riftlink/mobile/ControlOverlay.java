@@ -22,7 +22,7 @@ public final class ControlOverlay extends View {
     boolean game=false,edit=false,showButtons=true,mouseHeld=false,useXInput=false,pinching=false;
     float lastPinchDistance=0,lastPinchCenterX=0,lastPinchCenterY=0;
     int opacity=135;
-    float cursorX=.5f,cursorY=.5f,videoBoxW,videoBoxH;
+    float cursorX=.5f,cursorY=.5f,videoBoxW,videoBoxH,cursorOffsetX=0,cursorOffsetY=0;
     int mousePointer=-1,editingPointer=-1;
     KeyButton selected=null;
     float originX,originY,lastX,lastY;
@@ -114,8 +114,8 @@ public final class ControlOverlay extends View {
         // Software cursor is essential because Desktop Duplication may not include
         // Windows' separate hardware mouse pointer in the H.264 texture.
         if(!game){
-            float px=getWidth()*.5f+(cursorX-.5f)*videoBoxW;
-            float py=getHeight()*.5f+(cursorY-.5f)*videoBoxH;
+            float px=getWidth()*.5f+(cursorX-.5f)*videoBoxW+cursorOffsetX;
+            float py=getHeight()*.5f+(cursorY-.5f)*videoBoxH+cursorOffsetY;
             p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(Math.max(3,Math.min(getWidth(),getHeight())*.004f));
             p.setColor(0xFF000000);c.drawCircle(px,py,11,p);
             p.setColor(0xFFFFFFFF);c.drawCircle(px,py,8,p);
