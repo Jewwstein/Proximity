@@ -182,6 +182,11 @@ public final class ControlOverlay extends View {
     }
     @Override public boolean onTouchEvent(android.view.MotionEvent e){
         int action=e.getActionMasked(),index=e.getActionIndex(),id=e.getPointerId(index);
+        if(e.getPointerCount()==2 && action==MotionEvent.ACTION_POINTER_DOWN){
+            // Switching from typing to desktop gestures must dismiss the IME,
+            // otherwise its window can consume one finger and break pinch zoom.
+            ((MainActivity)getContext()).closeKeyboardForGesture();
+        }
         float x=e.getX(index),y=e.getY(index);
         if(e.getPointerCount()>=3 && action==MotionEvent.ACTION_POINTER_DOWN){
             cancelAll();
