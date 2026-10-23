@@ -219,30 +219,57 @@ public class RiftNet {
             }catch(Exception ex){inputConnected=false;try{inputSocket.close();}catch(Exception ignored){}}
         });
     }
-    void startStream(StreamDecoder decoder,Consumer<String> status){
+    final java.util.concurrent.atomic.AtomicInteger streamEpoch=new java.util.concurrent.atomic.AtomicInteger();
+    // An epoch prevents an older reconnect loop from stealing the new stream.
+    void startStream(StreamDecoder decoder,Consumer<String> status,Consumer<int[]> resolutionChange){
+        final int generation=streamEpoch.incrementAndGet();
         streaming=true;
         work.execute(()->{
-            while(running&&streaming){
+            while(running&&streaming&&streamEpoch.get()==generation){
+                HttpsURLConnection connection=null;
                 try{
-                    HttpsURLConnection c=open("/api/stream?token="+token,"GET");
-                    c.setReadTimeout(0);streamConnection=c;
-                    int streamCode=c.getResponseCode();
+                    connection=open("/api/stream?v=2&token="+token,"GET");
+                    connection.setReadTimeout(0);streamConnection=connection;
+                    int streamCode=connection.getResponseCode();
                     if(streamCode==401){onUnauthorized();return;}
-                    if(streamCode!=200)throw new IOException("Stream HTTP "+streamCode);
-                    try(DataInputStream in=new DataInputStream(new BufferedInputStream(c.getInputStream(),1024*256))){
-                        while(running&&streaming){
-                            int len=in.readInt();boolean key=in.readUnsignedByte()==1;long micros=in.readLong();
-                            if(len<=0||len>12*1024*1024)throw new IOException("Invalid encoded frame size: "+len);
+                    if(streamCode!=200)throw new IOException("Video HTTP "+streamCode);
+                    long firstPTS=-1,firstArrival=-1,lastFeedbackTime=0;
+                    int lastWidth=0,lastHeight=0;
+                    try(DataInputStream in=new DataInputStream(new BufferedInputStream(connection.getInputStream(),128*1024))){
+                        while(running&&streaming&&streamEpoch.get()==generation){
+                            int len=in.readInt();
+                            boolean key=in.readUnsignedByte()==1;
+                            long micros=in.readLong();
+                            int frameWidth=in.readUnsignedShort(),frameHeight=in.readUnsignedShort();
+                            if(len<=0||len>12*1024*1024||frameWidth<64||frameHeight<64)
+                                throw new IOException("Invalid video frame header");
                             byte[] payload=new byte[len];in.readFully(payload);
-                            decoder.frame(payload,key,micros);
+                            long arrival=SystemClock.elapsedRealtime();
+                            if(lastWidth!=frameWidth||lastHeight!=frameHeight){
+                                lastWidth=frameWidth;lastHeight=frameHeight;
+                                resolutionChange.accept(new int[]{frameWidth,frameHeight});
+                            }
+                            if(firstPTS<0 || micros<firstPTS){
+                                firstPTS=micros;firstArrival=arrival;
+                            }
+                            // Estimate growing end-to-end stream backlog from frame age,
+                            // excluding the initial one-time network startup delay.
+                            long lag=Math.max(0,(arrival-firstArrival)-(micros-firstPTS)/1000);
+                            if(arrival-lastFeedbackTime>800){
+                                input("feedback","",Math.min(1,lag/1000.0f),0);
+                                lastFeedbackTime=arrival;
+                            }
+                            decoder.frame(payload,key,micros,frameWidth,frameHeight);
                         }
-                    }finally{c.disconnect();}
-                }catch(Exception ex){
-                    if(running&&streaming){
-                        status.accept("Video reconnecting: "+ex.getMessage());
-                        decoder.reset();
-                        try{Thread.sleep(400);}catch(InterruptedException ignored){}
                     }
+                }catch(Exception ex){
+                    if(running&&streaming&&streamEpoch.get()==generation){
+                        status.accept("Re-syncing live video: "+ex.getMessage());
+                        decoder.reset();
+                        try{Thread.sleep(180);}catch(InterruptedException ignored){}
+                    }
+                }finally{
+                    if(connection!=null)connection.disconnect();
                 }
             }
         });
@@ -367,7 +394,7 @@ public class RiftNet {
             }
         });
     }
-    void stopStream(){streaming=false;if(streamConnection!=null)streamConnection.disconnect();}
+    void stopStream(){streaming=false;streamEpoch.incrementAndGet();if(streamConnection!=null)streamConnection.disconnect();}
     void stop(){
         input("up","",0.5f,0.5f);
         input("releaseAllKeys","",0.5f,0.5f);
