@@ -173,6 +173,11 @@ public final class ControlOverlay extends View {
         prefs.edit().remove("fpsButtons").apply();
         cancelAll();fpsDefaults();save();invalidate();
     }
+    void resetThumbPositions(){
+        if(!thumbMode)return;
+        prefs.edit().remove("thumbButtons").apply();
+        cancelAll();thumbDefaults();save();invalidate();
+    }
     void sendButton(String label,boolean down,String fallback){
         if(useXInput)send.send(down?"padDown":"padUp",label,cursorX,cursorY);
         else if(fallback.equals("MOUSE_RIGHT")){
