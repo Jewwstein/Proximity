@@ -24,6 +24,8 @@ public class RiftNet {
     final String host;
     final ExecutorService work=Executors.newCachedThreadPool();
     final ExecutorService inputWork=Executors.newSingleThreadExecutor();
+    final java.util.concurrent.atomic.AtomicReference<byte[]> newestMove=new java.util.concurrent.atomic.AtomicReference<>();
+    final java.util.concurrent.atomic.AtomicBoolean moveQueued=new java.util.concurrent.atomic.AtomicBoolean(false);
     volatile boolean running=true, streaming=false;
     final java.util.concurrent.atomic.AtomicBoolean authErrorShown=new java.util.concurrent.atomic.AtomicBoolean(false);
     volatile String token="", fingerprint="";
@@ -197,27 +199,56 @@ public class RiftNet {
     void connectInputs(){inputWork.execute(this::connectSocket);}
     void input(String action,String key,float x,float y){
         if(!running)return;
+        JSONObject obj=new JSONObject();
+        try{
+            obj.put("a",action);
+            obj.put("x",Math.max(0,Math.min(1,x)));
+            obj.put("y",Math.max(0,Math.min(1,y)));
+            if(key!=null&&!key.isEmpty())obj.put("t",key);
+        }catch(Exception ignored){}
+        byte[] payload=obj.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
         if(action.equals("move")){
             long now=SystemClock.elapsedRealtime();
-            if(now-lastMove<12)return;lastMove=now;
+            if(now-lastMove<9)return; lastMove=now;
+            // Never enqueue hundreds of obsolete trackpad coordinates behind clicks.
+            // Send the latest pointer position once; buttons stay FIFO.
+            newestMove.set(payload);
+            scheduleMove();
+        }else {
+            inputWork.execute(()->sendInputPayload(payload));
         }
-        JSONObject obj=new JSONObject();
-        try{obj.put("a",action);obj.put("x",Math.max(0,Math.min(1,x)));obj.put("y",Math.max(0,Math.min(1,y)));
-           if(key!=null&&!key.isEmpty())obj.put("t",key);}catch(Exception ignored){}
-        byte[] payload=obj.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        inputWork.execute(()->{
-            if(!inputConnected||inputOut==null){if(!connectSocket())return;}
-            try{
-                // RFC 6455 masked client text frame
-                byte[] mask=new byte[4];new SecureRandom().nextBytes(mask);
-                ByteArrayOutputStream f=new ByteArrayOutputStream();
-                f.write(0x81);if(payload.length<126){f.write(payload.length|0x80);}
-                else {f.write(126|0x80);f.write((payload.length>>8)&255);f.write(payload.length&255);}
-                f.write(mask);
-                for(int i=0;i<payload.length;i++)f.write(payload[i]^mask[i%4]);
-                inputOut.write(f.toByteArray()); inputOut.flush();
-            }catch(Exception ex){inputConnected=false;try{inputSocket.close();}catch(Exception ignored){}}
-        });
+    }
+    void scheduleMove(){
+        if(moveQueued.compareAndSet(false,true)){
+            inputWork.execute(()->{
+                try{
+                    byte[] data=newestMove.getAndSet(null);
+                    if(data!=null)sendInputPayload(data);
+                }finally{
+                    moveQueued.set(false);
+                    if(newestMove.get()!=null&&running)scheduleMove();
+                }
+            });
+        }
+    }
+    void sendInputPayload(byte[] payload){
+        if(!running)return;
+        if(!inputConnected||inputOut==null){if(!connectSocket())return;}
+        try{
+            byte[] mask=new byte[4];
+            new SecureRandom().nextBytes(mask);
+            ByteArrayOutputStream frame=new ByteArrayOutputStream(payload.length+16);
+            frame.write(0x81);
+            if(payload.length<126)frame.write(payload.length|0x80);
+            else{frame.write(126|0x80);frame.write((payload.length>>8)&255);frame.write(payload.length&255);}
+            frame.write(mask);
+            for(int i=0;i<payload.length;i++)frame.write(payload[i]^mask[i%4]);
+            inputOut.write(frame.toByteArray());
+            inputOut.flush();
+        }catch(Exception e){
+            inputConnected=false;
+            try{if(inputSocket!=null)inputSocket.close();}catch(Exception ignored){}
+        }
     }
     final java.util.concurrent.atomic.AtomicInteger streamEpoch=new java.util.concurrent.atomic.AtomicInteger();
     // An epoch prevents an older reconnect loop from stealing the new stream.
@@ -233,7 +264,8 @@ public class RiftNet {
                     int streamCode=connection.getResponseCode();
                     if(streamCode==401){onUnauthorized();return;}
                     if(streamCode!=200)throw new IOException("Video HTTP "+streamCode);
-                    long firstPTS=-1,firstArrival=-1,lastFeedbackTime=0;
+                    long firstPTS=-1,firstArrival=-1,lastFeedbackTime=0,lastIDRRequest=0;
+                    boolean needKeyframe=true;
                     int lastWidth=0,lastHeight=0;
                     try(DataInputStream in=new DataInputStream(new BufferedInputStream(connection.getInputStream(),128*1024))){
                         while(running&&streaming&&streamEpoch.get()==generation){
@@ -259,14 +291,25 @@ public class RiftNet {
                                 input("feedback","",Math.min(1,lag/1000.0f),0);
                                 lastFeedbackTime=arrival;
                             }
-                            decoder.frame(payload,key,micros,frameWidth,frameHeight);
+                            // A stale TCP buffer makes a beautiful but unplayably late
+                            // desktop. Rejoin the live edge; the new stream requests an IDR.
+                            if(lag>290 && arrival-firstArrival>1200){
+                                throw new IOException("stream delay "+lag+"ms; catching up");
+                            }
+                            if(needKeyframe && !key)continue;
+                            boolean accepted=decoder.frame(payload,key,micros,frameWidth,frameHeight);
+                            needKeyframe=!accepted;
+                            if(!accepted && arrival-lastIDRRequest>450){
+                                input("keyframe","",0,0);
+                                lastIDRRequest=arrival;
+                            }
                         }
                     }
                 }catch(Exception ex){
                     if(running&&streaming&&streamEpoch.get()==generation){
                         status.accept("Re-syncing live video: "+ex.getMessage());
                         decoder.reset();
-                        try{Thread.sleep(180);}catch(InterruptedException ignored){}
+                        try{Thread.sleep(65);}catch(InterruptedException ignored){}
                     }
                 }finally{
                     if(connection!=null)connection.disconnect();
