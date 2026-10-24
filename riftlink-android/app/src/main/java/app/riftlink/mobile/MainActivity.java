@@ -4,6 +4,7 @@ import android.app.*;
 import android.os.*;
 import android.content.*;
 import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 import android.graphics.*;
 import android.graphics.SurfaceTexture;
 import android.view.*;
@@ -74,6 +75,8 @@ public class MainActivity extends Activity {
         keyboardParams.setMargins(dp(6),dp(54),dp(6),0);
         root.addView(liveKeyboard,keyboardParams);
         setContentView(root);
+        applyUserOrientationMode();
+        root.post(this::resizeOrientationUI);
         // Already paired? Reconnect automatically when the app opens.
         String previousHost=getPreferences(0).getString("host","");
         if(!previousHost.isEmpty() && !getPreferences(0).getString("token-"+previousHost,"").isEmpty()){
@@ -95,6 +98,7 @@ public class MainActivity extends Activity {
     void createMenu(){
         menu=new LinearLayout(this);menu.setOrientation(LinearLayout.VERTICAL);
         menu.setPadding(dp(6),dp(6),dp(6),dp(6));menu.setBackgroundColor(0xEA071626);
+        addMenu("Screen rotation • Auto / Portrait / Landscape",this::chooseOrientation);
         addMenu("Desktop / Controller",()->{
             controls.cancelAll();
             if(controls.fpsMode)controls.setFpsMode(false);
@@ -174,6 +178,63 @@ public class MainActivity extends Activity {
             Math.max(dp(160),getResources().getDisplayMetrics().heightPixels-dp(62)),Gravity.TOP|Gravity.RIGHT);
         p.setMargins(0,dp(53),dp(8),0);
         root.addView(menuScroller,p);menuScroller.setVisibility(View.GONE);
+    }
+    void applyUserOrientationMode(){
+        String mode=getPreferences(0).getString("screenMode","auto");
+        int choice=mode.equals("portrait")?ActivityInfo.SCREEN_ORIENTATION_PORTRAIT:
+            mode.equals("landscape")?ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE:
+            ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR;
+        if(getRequestedOrientation()!=choice)setRequestedOrientation(choice);
+    }
+    void chooseOrientation(){
+        menuScroller.setVisibility(View.GONE);
+        final String[] labels={"Automatic rotation","Portrait (vertical)","Landscape (horizontal)"};
+        final String[] modes={"auto","portrait","landscape"};
+        String current=getPreferences(0).getString("screenMode","auto");
+        int selected=current.equals("portrait")?1:current.equals("landscape")?2:0;
+        new AlertDialog.Builder(this).setTitle("RiftLink screen orientation")
+            .setSingleChoiceItems(labels,selected,(dialog,index)->{
+                getPreferences(0).edit().putString("screenMode",modes[index]).apply();
+                if(liveKeyboard!=null && liveKeyboard.isShowing())liveKeyboard.hide();
+                dialog.dismiss();
+                applyUserOrientationMode();
+            }).setNegativeButton("Cancel",null).show();
+    }
+    @Override public void onConfigurationChanged(Configuration configuration){
+        super.onConfigurationChanged(configuration);
+        if(controls!=null)controls.onOrientationChanged(
+            configuration.orientation==Configuration.ORIENTATION_PORTRAIT);
+        if(liveKeyboard!=null && liveKeyboard.isShowing())liveKeyboard.hide();
+        if(menuScroller!=null)menuScroller.setVisibility(View.GONE);
+        // Orientation changes retain the surface, stream and saved authentication.
+        zoom=1f;panX=0f;panY=0f;
+        if(root!=null)root.post(this::resizeOrientationUI);
+    }
+    void resizeOrientationUI(){
+        if(root==null)return;
+        int width=root.getWidth(),height=root.getHeight();
+        if(width<=0||height<=0)return;
+        boolean portrait=height>width;
+        if(menuScroller!=null){
+            FrameLayout.LayoutParams lp=(FrameLayout.LayoutParams)menuScroller.getLayoutParams();
+            lp.width=Math.min(dp(244),Math.max(dp(180),width-dp(16)));
+            lp.height=Math.max(dp(110),height-dp(62));
+            menuScroller.setLayoutParams(lp);
+        }
+        if(connectionPanel!=null && connectionPanel.getChildCount()>0){
+            View panel=connectionPanel.getChildAt(0);
+            FrameLayout.LayoutParams lp=(FrameLayout.LayoutParams)panel.getLayoutParams();
+            lp.width=Math.min(dp(470),Math.max(dp(220),width-dp(24)));
+            panel.setLayoutParams(lp);
+        }
+        if(status!=null){
+            FrameLayout.LayoutParams lp=(FrameLayout.LayoutParams)status.getLayoutParams();
+            lp.topMargin=portrait?dp(53):dp(8);
+            status.setMaxWidth(Math.max(dp(150),width-dp(24)));
+            status.setLayoutParams(lp);
+        }
+        fitVideo();
+        if(controls!=null)controls.invalidate();
     }
     void chooseLookSensitivity(){
         menuScroller.setVisibility(View.GONE);
