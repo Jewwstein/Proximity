@@ -313,15 +313,15 @@ public final class ControlOverlay extends View {
     }
     void axis(float x,float y,KeyButton b,String stick){
         float radius=Math.max(1f,b.r*Math.min(getWidth(),getHeight()));
-        float dx=Math.max(-1f,Math.min(1f,(x-b.x*getWidth())/radius*(fpsMode&&stick.equals("RIGHT")?lookSensitivity:1f)));
-        float dy=Math.max(-1f,Math.min(1f,(y-b.y*getHeight())/radius*(fpsMode&&stick.equals("RIGHT")?lookSensitivity:1f)));
+        float dx=Math.max(-1f,Math.min(1f,(x-b.x*getWidth())/radius*((fpsMode||thumbMode)&&stick.equals("RIGHT")?lookSensitivity:1f)));
+        float dy=Math.max(-1f,Math.min(1f,(y-b.y*getHeight())/radius*((fpsMode||thumbMode)&&stick.equals("RIGHT")?lookSensitivity:1f)));
         send.send("padAxis",stick,(dx+1)/2f,(dy+1)/2f);
     }
     void aim(float x,float y,KeyButton b){
         if(useXInput)axis(x,y,b,"RIGHT");
         else {float dx=(x-b.x*getWidth())/(b.r*Math.min(getWidth(),getHeight()));
               float dy=(y-b.y*getHeight())/(b.r*Math.min(getWidth(),getHeight()));
-              mouseMove(dx*(fpsMode?lookSensitivity:1f)*4f,dy*(fpsMode?lookSensitivity:1f)*4f);}
+              mouseMove(dx*((fpsMode||thumbMode)?lookSensitivity:1f)*4f,dy*(fpsMode?lookSensitivity:1f)*4f);}
     }
     void mouseMove(float dx,float dy){
         float vw=Math.max(1,videoBoxW),vh=Math.max(1,videoBoxH);
