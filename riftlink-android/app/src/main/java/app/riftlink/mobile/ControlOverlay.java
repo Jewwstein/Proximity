@@ -21,6 +21,7 @@ public final class ControlOverlay extends View {
     final Paint p=new Paint(3);
     boolean game=false,edit=false,showButtons=true,mouseHeld=false,useXInput=false,pinching=false;
     boolean fpsMode=false,thumbMode=false,adsToggle=false,adsLatched=false;
+    boolean layoutPortrait=false;
     // Right thumb: look normally; lift-and-regrab to shoot; two short taps to ADS.
     boolean rightFiring=false,lastAimWasTap=false,aimMoved=false,regrabAfterTap=false,regrabActive=false;
     long lastAimReleased=0,aimPressedAt=0;
@@ -40,6 +41,8 @@ public final class ControlOverlay extends View {
     ControlOverlay(Context c,Sender s,Mapper m){
         super(c);send=s;mapper=m;prefs=c.getSharedPreferences("controller",0);
         setLayerType(View.LAYER_TYPE_SOFTWARE,null);
+        layoutPortrait=c.getResources().getConfiguration().orientation==
+            android.content.res.Configuration.ORIENTATION_PORTRAIT;
         game=prefs.getBoolean("game",false);
         fpsMode=prefs.getBoolean("fpsMode",false);
         thumbMode=prefs.getBoolean("thumbMode",false);
@@ -48,7 +51,43 @@ public final class ControlOverlay extends View {
         lookSensitivity=prefs.getFloat("lookSensitivity",1f);
         opacity=prefs.getInt("opacity",135);
         showButtons=prefs.getBoolean("show",true);
-        defaults();if(fpsMode)fpsDefaults();if(thumbMode)thumbDefaults();restore();
+        loadLayoutForOrientation();
+    }
+    String layoutStoreKey(){
+        String key=thumbMode?"thumbButtons":fpsMode?"fpsButtons":"buttons";
+        return layoutPortrait?key+"Portrait":key;
+    }
+    void loadLayoutForOrientation(){
+        defaults();if(fpsMode)fpsDefaults();if(thumbMode)thumbDefaults();
+        if(layoutPortrait)applyPortraitDefaults();
+        restore();invalidate();
+    }
+    void applyPortraitDefaults(){
+        // Portrait gets its OWN saved control locations. Landscape positions remain untouched.
+        for(KeyButton b:buttons){
+            switch(b.label){
+                case "JOY":b.x=.25f;b.y=.83f;b.r=.19f;break;
+                case "AIM":b.x=.75f;b.y=.83f;b.r=.19f;break;
+                case "LT":b.x=.20f;b.y=.56f;b.r=.080f;break;
+                case "RT":b.x=.80f;b.y=.56f;b.r=.080f;break;
+                case "LB":b.x=.23f;b.y=.68f;b.r=.050f;break;
+                case "RB":b.x=.77f;b.y=.68f;b.r=.050f;break;
+                case "A":b.x=.46f;b.y=.68f;b.r=.058f;break;
+                case "B":b.x=.60f;b.y=.93f;b.r=.053f;break;
+                case "X":b.x=.40f;b.y=.93f;b.r=.053f;break;
+                case "Y":b.x=.60f;b.y=.68f;b.r=.050f;break;
+                case "L3":b.x=.17f;b.y=.96f;b.r=.038f;break;
+                case "R3":b.x=.83f;b.y=.96f;b.r=.038f;break;
+                default:break;
+            }
+        }
+    }
+    void onOrientationChanged(boolean portrait){
+        if(layoutPortrait==portrait)return;
+        cancelAll();
+        save();
+        layoutPortrait=portrait;
+        loadLayoutForOrientation();
     }
     void defaults(){
         buttons.clear();
@@ -97,12 +136,12 @@ public final class ControlOverlay extends View {
     void setFpsMode(boolean value){
         cancelAll();save();
         thumbMode=false;fpsMode=value;game=true;edit=false;showButtons=true;
-        defaults();if(fpsMode)fpsDefaults();restore();save();invalidate();
+        loadLayoutForOrientation();save();invalidate();
     }
     void setThumbMode(boolean value){
         cancelAll();save();
         thumbMode=value;fpsMode=false;game=true;edit=false;showButtons=true;
-        defaults();if(thumbMode)thumbDefaults();restore();save();invalidate();
+        loadLayoutForOrientation();save();invalidate();
     }
     void startThumbAim(float x,float y,KeyButton b){
         long now=SystemClock.uptimeMillis();
@@ -170,13 +209,13 @@ public final class ControlOverlay extends View {
     }
     void resetFpsPositions(){
         if(!fpsMode)return;
-        prefs.edit().remove("fpsButtons").apply();
-        cancelAll();fpsDefaults();save();invalidate();
+        prefs.edit().remove(layoutStoreKey()).apply();
+        cancelAll();loadLayoutForOrientation();save();invalidate();
     }
     void resetThumbPositions(){
         if(!thumbMode)return;
-        prefs.edit().remove("thumbButtons").apply();
-        cancelAll();thumbDefaults();save();invalidate();
+        prefs.edit().remove(layoutStoreKey()).apply();
+        cancelAll();loadLayoutForOrientation();save();invalidate();
     }
     void sendButton(String label,boolean down,String fallback){
         if(useXInput)send.send(down?"padDown":"padUp",label,cursorX,cursorY);
@@ -188,7 +227,7 @@ public final class ControlOverlay extends View {
     }
     void restore(){
         try{
-            JSONArray ar=new JSONArray(prefs.getString(thumbMode?"thumbButtons":fpsMode?"fpsButtons":"buttons","[]"));
+            JSONArray ar=new JSONArray(prefs.getString(layoutStoreKey(),"[]"));
             for(int i=0;i<ar.length();i++){
                 JSONObject o=ar.getJSONObject(i);
                 String label=o.optString("label");
@@ -207,7 +246,7 @@ public final class ControlOverlay extends View {
             try{o.put("label",b.label);o.put("key",b.key);o.put("x",b.x);o.put("y",b.y);o.put("r",b.r);}catch(Exception ignored){}
             ar.put(o);
         }
-        prefs.edit().putString(thumbMode?"thumbButtons":fpsMode?"fpsButtons":"buttons",ar.toString()).putInt("opacity",opacity)
+        prefs.edit().putString(layoutStoreKey(),ar.toString()).putInt("opacity",opacity)
             .putBoolean("thumbMode",thumbMode)
             .putBoolean("fpsMode",fpsMode).putBoolean("adsToggle",adsToggle)
             .putFloat("lookSensitivity",lookSensitivity)
