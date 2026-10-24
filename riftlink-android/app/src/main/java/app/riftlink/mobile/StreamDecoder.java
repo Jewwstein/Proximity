@@ -61,7 +61,7 @@ final class StreamDecoder {
             }
             // Very short dequeue avoids blocking the network reader behind a slow
             // hardware decoder. Resync from a keyframe after a jam.
-            int idx=decoder.dequeueInputBuffer(1000);
+            int idx=decoder.dequeueInputBuffer(5000);
             if(idx>=0){
                 ByteBuffer b=decoder.getInputBuffer(idx);
                 if(b!=null&&b.capacity()>=packet.length){
