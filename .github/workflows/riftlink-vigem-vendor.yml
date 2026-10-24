@@ -1,0 +1,46 @@
+name: Build verified ViGEm controller components
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gamepad:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Checkout official archived ViGEmClient source
+        uses: actions/checkout@v4
+        with:
+          repository: nefarius/ViGEmClient
+          ref: v1.16.18.0
+          submodules: recursive
+      - name: Compile Win64 official ViGEmClient DLL
+        shell: pwsh
+        run: |
+          $msbuild = & "$env:ProgramFiles(x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
+          if (-not $msbuild) { throw "Visual Studio MSBuild unavailable" }
+          & $msbuild ViGEmClient.sln /t:Build /p:Configuration=Release_DLL /p:Platform=x64 /p:PlatformToolset=v142 /m
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dll = Get-ChildItem -Recurse -Filter ViGEmClient.dll | Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
+          if (-not $dll) { throw "ViGEmClient.dll missing" }
+          New-Item -ItemType Directory -Force component | Out-Null
+          Copy-Item $dll.FullName component\ViGEmClient.dll
+          Get-FileHash component\ViGEmClient.dll -Algorithm SHA256 | Format-List
+      - name: Retrieve signed driver from official Nefarius release
+        shell: pwsh
+        run: |
+          $url = "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe"
+          Invoke-WebRequest -Uri $url -OutFile component\ViGEmBus_1.22.0_x64_x86_arm64.exe
+          $file = "component\ViGEmBus_1.22.0_x64_x86_arm64.exe"
+          $sig = Get-AuthenticodeSignature $file
+          Write-Host "Signature status:" $sig.Status
+          Write-Host "Signer:" $sig.SignerCertificate.Subject
+          if ($sig.Status -ne 'Valid') { throw "Official driver installer failed Authenticode signature verification" }
+          Get-FileHash $file -Algorithm SHA256 | Format-List
+      - name: Upload the audited driver components
+        uses: actions/upload-artifact@v4
+        with:
+          name: RiftLink-ViGEm-Official-Components
+          path: component/
+          if-no-files-found: error
+          retention-days: 7
