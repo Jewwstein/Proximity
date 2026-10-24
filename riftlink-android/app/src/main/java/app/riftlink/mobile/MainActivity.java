@@ -95,7 +95,29 @@ public class MainActivity extends Activity {
     void createMenu(){
         menu=new LinearLayout(this);menu.setOrientation(LinearLayout.VERTICAL);
         menu.setPadding(dp(6),dp(6),dp(6),dp(6));menu.setBackgroundColor(0xEA071626);
-        addMenu("Desktop / Controller",()->{controls.game=!controls.game;controls.invalidate(); menuScroller.setVisibility(View.GONE);});
+        addMenu("Desktop / Controller",()->{
+            controls.cancelAll();
+            if(controls.fpsMode)controls.setFpsMode(false);
+            controls.game=!controls.game;controls.save();controls.invalidate();
+            menuScroller.setVisibility(View.GONE);
+        });
+        addMenu("FPS claw mode • dual stick + ADS/FIRE",()->{
+            boolean enable=!controls.fpsMode;
+            controls.setFpsMode(enable);
+            menuScroller.setVisibility(View.GONE);
+            toast(enable?"FPS MODE: thumbs on MOVE/LOOK, index fingers on LT ADS and RT FIRE":
+                "FPS MODE OFF");
+        });
+        addMenu("FPS ADS: hold / toggle",()->{
+            controls.setAdsToggle(!controls.adsToggle);
+            menuScroller.setVisibility(View.GONE);
+            toast(controls.adsToggle?"ADS: tap LT to toggle (tap again to release)":"ADS: hold LT to aim");
+        });
+        addMenu("FPS right-stick sensitivity",this::chooseLookSensitivity);
+        addMenu("Reset FPS button positions",()->{
+            controls.resetFpsPositions();menuScroller.setVisibility(View.GONE);
+            toast("FPS claw layout restored");
+        });
         addMenu("Edit control positions",()->{controls.edit=!controls.edit; controls.game=true;
             controls.invalidate(); menuScroller.setVisibility(View.GONE);toast(controls.edit?"Drag buttons to move; tap to change key":"Layout saved");});
         addMenu("Show / Hide buttons",()->{controls.showButtons=!controls.showButtons; controls.save(); controls.invalidate();menuScroller.setVisibility(View.GONE);});
@@ -117,7 +139,11 @@ public class MainActivity extends Activity {
                 toast(net.autoFileSyncEnabled?"PC file auto-sync ON":"PC file auto-sync OFF");
             }menuScroller.setVisibility(View.GONE);
         });
-        addMenu("Gamepad / connection status",()->{toast(controls.useXInput?"Xbox virtual pad connected":"Gamepad not available on PC: using keyboard/mouse controls");menuScroller.setVisibility(View.GONE);});
+        addMenu("Gamepad / connection status",()->{
+            toast(controls.useXInput?"Xbox controller ready — LT/RT are analog triggers":
+                "No Xbox controller on host. FPS joystick uses keyboard/mouse fallback; ADS hold needs Xbox mode.");
+            menuScroller.setVisibility(View.GONE);
+        });
         addMenu("Sound on / off",()->{audioEnabled=!audioEnabled;if(net!=null){net.stopAudio();if(audioEnabled)net.startAudio(s->runOnUiThread(()->status.setText(s)));}toast(audioEnabled?"Audio on":"Audio off");});
         addMenu("Reconnect",()->{menuScroller.setVisibility(View.GONE);reconnect();});
         addMenu("Disconnect",()->{menuScroller.setVisibility(View.GONE);stopVideo();connectionPanel.setVisibility(View.VISIBLE);});
@@ -130,6 +156,16 @@ public class MainActivity extends Activity {
             Math.max(dp(160),getResources().getDisplayMetrics().heightPixels-dp(62)),Gravity.TOP|Gravity.RIGHT);
         p.setMargins(0,dp(53),dp(8),0);
         root.addView(menuScroller,p);menuScroller.setVisibility(View.GONE);
+    }
+    void chooseLookSensitivity(){
+        menuScroller.setVisibility(View.GONE);
+        final String[] choices={"Slow 0.65×","Normal 1.0×","Fast 1.45×","Very fast 2.0×"};
+        final float[] values={.65f,1f,1.45f,2f};
+        new AlertDialog.Builder(this).setTitle("FPS camera sensitivity")
+            .setSingleChoiceItems(choices,1,(d,index)->{
+                controls.setLookSensitivity(values[index]);d.dismiss();
+                toast("Right stick sensitivity: "+choices[index]);
+            }).setNegativeButton("Cancel",null).show();
     }
     void addMenu(String label,Runnable action){
         Button b=button(label);menu.addView(b,new LinearLayout.LayoutParams(-1,dp(44)));
