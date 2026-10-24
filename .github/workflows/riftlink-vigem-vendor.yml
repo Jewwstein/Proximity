@@ -1,5 +1,8 @@
 name: Build verified ViGEm controller components
 on:
+  push:
+    branches: [riftlink-apk-build]
+    paths: [".github/workflows/riftlink-vigem-vendor.yml"]
   workflow_dispatch:
 permissions:
   contents: read
