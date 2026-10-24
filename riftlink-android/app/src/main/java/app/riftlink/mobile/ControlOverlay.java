@@ -20,6 +20,9 @@ public final class ControlOverlay extends View {
     final HashSet<String> joystickDown=new HashSet<>();
     final Paint p=new Paint(3);
     boolean game=false,edit=false,showButtons=true,mouseHeld=false,useXInput=false,pinching=false;
+    boolean fpsMode=false,adsToggle=false,adsLatched=false;
+    float lookSensitivity=1f;
+    long lastLookTap=0;
     float lastPinchDistance=0,lastPinchCenterX=0,lastPinchCenterY=0;
     int opacity=135;
     float cursorX=.5f,cursorY=.5f,videoBoxW,videoBoxH,cursorOffsetX=0,cursorOffsetY=0;
@@ -33,9 +36,12 @@ public final class ControlOverlay extends View {
         super(c);send=s;mapper=m;prefs=c.getSharedPreferences("controller",0);
         setLayerType(View.LAYER_TYPE_SOFTWARE,null);
         game=prefs.getBoolean("game",false);
+        fpsMode=prefs.getBoolean("fpsMode",false);
+        adsToggle=prefs.getBoolean("adsToggle",false);
+        lookSensitivity=prefs.getFloat("lookSensitivity",1f);
         opacity=prefs.getInt("opacity",135);
         showButtons=prefs.getBoolean("show",true);
-        defaults();restore();
+        defaults();if(fpsMode)fpsDefaults();restore();
     }
     void defaults(){
         buttons.clear();
@@ -55,9 +61,51 @@ public final class ControlOverlay extends View {
         buttons.add(new KeyButton("L3","SHIFT",.28f,.85f,.045f));
         buttons.add(new KeyButton("R3","CTRL",.66f,.90f,.045f));
     }
+    void fpsDefaults(){
+        buttons.clear();
+        // Four-finger claw: thumbs never leave MOVE/LOOK; index fingers use ADS/FIRE.
+        // Top-center remains clear for the connection menu and Fit button.
+        buttons.add(new KeyButton("JOY","JOY",.15f,.76f,.165f));
+        buttons.add(new KeyButton("AIM","AIM",.79f,.76f,.165f));
+        buttons.add(new KeyButton("LT","MOUSE_RIGHT",.14f,.29f,.105f));
+        buttons.add(new KeyButton("RT","MOUSE_LEFT",.87f,.29f,.105f));
+        buttons.add(new KeyButton("A","SPACE",.56f,.71f,.060f));
+        buttons.add(new KeyButton("B","CTRL",.48f,.85f,.060f));
+        buttons.add(new KeyButton("X","R",.60f,.85f,.060f));
+        buttons.add(new KeyButton("Y","F",.64f,.58f,.060f));
+        buttons.add(new KeyButton("L3","SHIFT",.34f,.92f,.053f));
+        buttons.add(new KeyButton("LB","Q",.30f,.29f,.056f));
+        buttons.add(new KeyButton("RB","E",.71f,.29f,.056f));
+    }
+    void setFpsMode(boolean value){
+        cancelAll();
+        save();
+        fpsMode=value;game=true;edit=false;showButtons=true;
+        defaults();if(fpsMode)fpsDefaults();restore();save();invalidate();
+    }
+    void setAdsToggle(boolean value){
+        if(adsLatched){sendButton("LT",false,"MOUSE_RIGHT");adsLatched=false;}
+        adsToggle=value;save();invalidate();
+    }
+    void setLookSensitivity(float value){
+        lookSensitivity=Math.max(.5f,Math.min(2.5f,value));save();
+    }
+    void resetFpsPositions(){
+        if(!fpsMode)return;
+        prefs.edit().remove("fpsButtons").apply();
+        cancelAll();fpsDefaults();save();invalidate();
+    }
+    void sendButton(String label,boolean down,String fallback){
+        if(useXInput)send.send(down?"padDown":"padUp",label,cursorX,cursorY);
+        else if(fallback.equals("MOUSE_RIGHT")){
+            // On the existing v1.8 Windows host this is a momentary right-click.
+            // Native Xbox mode supports true held LT, and is preferred for FPS.
+            if(down)send.send("right","",cursorX,cursorY);
+        }else if(down)press(fallback);else release(fallback);
+    }
     void restore(){
         try{
-            JSONArray ar=new JSONArray(prefs.getString("buttons","[]"));
+            JSONArray ar=new JSONArray(prefs.getString(fpsMode?"fpsButtons":"buttons","[]"));
             for(int i=0;i<ar.length();i++){
                 JSONObject o=ar.getJSONObject(i);
                 String label=o.optString("label");
@@ -76,7 +124,9 @@ public final class ControlOverlay extends View {
             try{o.put("label",b.label);o.put("key",b.key);o.put("x",b.x);o.put("y",b.y);o.put("r",b.r);}catch(Exception ignored){}
             ar.put(o);
         }
-        prefs.edit().putString("buttons",ar.toString()).putInt("opacity",opacity)
+        prefs.edit().putString(fpsMode?"fpsButtons":"buttons",ar.toString()).putInt("opacity",opacity)
+            .putBoolean("fpsMode",fpsMode).putBoolean("adsToggle",adsToggle)
+            .putFloat("lookSensitivity",lookSensitivity)
             .putBoolean("game",game).putBoolean("show",showButtons).apply();
     }
     void reset(){cancelAll();}
@@ -85,11 +135,19 @@ public final class ControlOverlay extends View {
         for(KeyButton b:buttons)if(b.label.equals(name)){b.key=key;save();invalidate();return;}
     }
     void pressButton(KeyButton b){
-        if(useXInput)send.send("padDown",b.label,cursorX,cursorY);
+        if(fpsMode && b.label.equals("LT") && adsToggle){
+            adsLatched=!adsLatched;
+            sendButton("LT",adsLatched,b.key);
+            return;
+        }
+        if(fpsMode)sendButton(b.label,true,b.key);
+        else if(useXInput)send.send("padDown",b.label,cursorX,cursorY);
         else press(b.key);
     }
     void releaseButton(KeyButton b){
-        if(useXInput)send.send("padUp",b.label,cursorX,cursorY);
+        if(fpsMode && b.label.equals("LT") && adsToggle)return;
+        if(fpsMode)sendButton(b.label,false,b.key);
+        else if(useXInput)send.send("padUp",b.label,cursorX,cursorY);
         else release(b.key);
     }
     void release(String key){
@@ -103,6 +161,11 @@ public final class ControlOverlay extends View {
     void cancelAll(){
         for(KeyButton b:fingers.values())if(!b.key.equals("JOY")&&!b.key.equals("AIM"))releaseButton(b);
         fingers.clear();for(String key:joystickDown)release(key);joystickDown.clear();
+        if(adsLatched){sendButton("LT",false,"MOUSE_RIGHT");adsLatched=false;}
+        if(useXInput){
+            send.send("padAxis","LEFT",.5f,.5f);
+            send.send("padAxis","RIGHT",.5f,.5f);
+        }
         if(mouseHeld){send.send("up","",cursorX,cursorY);mouseHeld=false;}
         send.send("padReset","",cursorX,cursorY);
         send.send("releaseAllKeys","",cursorX,cursorY);
@@ -159,15 +222,15 @@ public final class ControlOverlay extends View {
     }
     void axis(float x,float y,KeyButton b,String stick){
         float radius=Math.max(1f,b.r*Math.min(getWidth(),getHeight()));
-        float dx=Math.max(-1f,Math.min(1f,(x-b.x*getWidth())/radius));
-        float dy=Math.max(-1f,Math.min(1f,(y-b.y*getHeight())/radius));
+        float dx=Math.max(-1f,Math.min(1f,(x-b.x*getWidth())/radius*(fpsMode&&stick.equals("RIGHT")?lookSensitivity:1f)));
+        float dy=Math.max(-1f,Math.min(1f,(y-b.y*getHeight())/radius*(fpsMode&&stick.equals("RIGHT")?lookSensitivity:1f)));
         send.send("padAxis",stick,(dx+1)/2f,(dy+1)/2f);
     }
     void aim(float x,float y,KeyButton b){
         if(useXInput)axis(x,y,b,"RIGHT");
         else {float dx=(x-b.x*getWidth())/(b.r*Math.min(getWidth(),getHeight()));
               float dy=(y-b.y*getHeight())/(b.r*Math.min(getWidth(),getHeight()));
-              mouseMove(dx*4f,dy*4f);}
+              mouseMove(dx*(fpsMode?lookSensitivity:1f)*4f,dy*(fpsMode?lookSensitivity:1f)*4f);}
     }
     void mouseMove(float dx,float dy){
         float vw=Math.max(1,videoBoxW),vh=Math.max(1,videoBoxH);
@@ -188,7 +251,8 @@ public final class ControlOverlay extends View {
             ((MainActivity)getContext()).closeKeyboardForGesture();
         }
         float x=e.getX(index),y=e.getY(index);
-        if(e.getPointerCount()>=3 && action==MotionEvent.ACTION_POINTER_DOWN){
+        // Three- and four-finger play is normal in FPS claw mode; never hide controls mid-fight.
+        if(!game && e.getPointerCount()>=3 && action==MotionEvent.ACTION_POINTER_DOWN){
             cancelAll();
             ((MainActivity)getContext()).toggleHud();
             return true;
