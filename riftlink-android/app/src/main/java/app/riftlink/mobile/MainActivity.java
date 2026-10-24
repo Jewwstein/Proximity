@@ -247,12 +247,14 @@ public class MainActivity extends Activity {
         status.setText("Pairing and checking video…");
         String pin=pinBox.getText().toString().trim();
         String savedHost=hostBox.getText().toString().trim();
-        String savedToken=getPreferences(0).getString("token-"+net.host,"");
+        String savedToken=getPreferences(0).getString("token-cert-"+net.fingerprint,"");
+        if(savedToken.isEmpty())savedToken=getPreferences(0).getString("token-"+net.host,"");
         net.authenticate(pin,savedToken,new RiftNet.AuthListener(){
             public void complete(String token,int w,int h,boolean gamepad){
                 runOnUiThread(()->{
                     desktopWidth=w;desktopHeight=h;
-                    getPreferences(0).edit().putString("token-"+net.host,token).apply();
+                    getPreferences(0).edit().putString("token-"+net.host,token)
+                        .putString("token-cert-"+net.fingerprint,token).apply();
                     connectionPanel.setVisibility(View.GONE);
                     controls.reset();controls.useXInput=gamepad;zoom=1;panX=0;panY=0;fitVideo();status.setText("Connecting video…");
                     net.connectInputs();
