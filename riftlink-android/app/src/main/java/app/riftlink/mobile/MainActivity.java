@@ -98,10 +98,25 @@ public class MainActivity extends Activity {
         addMenu("Desktop / Controller",()->{
             controls.cancelAll();
             if(controls.fpsMode)controls.setFpsMode(false);
+            if(controls.thumbMode)controls.setThumbMode(false);
             controls.game=!controls.game;controls.save();controls.invalidate();
             menuScroller.setVisibility(View.GONE);
         });
-        addMenu("FPS claw mode • dual stick + ADS/FIRE",()->{
+        addMenu("THUMB FPS • aim + fire on right stick",()->{
+            boolean enable=!controls.thumbMode;
+            controls.setThumbMode(enable);
+            menuScroller.setVisibility(View.GONE);
+            if(enable && !controls.useXInput){
+                new AlertDialog.Builder(this).setTitle("Two-thumb shooter mode enabled")
+                    .setMessage("MOVE with left thumb and LOOK with right. Lift and quickly re-touch the LOOK stick to FIRE while dragging. Two short taps toggle ADS.\n\nYour Windows host has not reported an Xbox gamepad, so real held ADS and shooter-style camera motion may require enabling the bundled Xbox controller in RiftLink Control Center.")
+                    .setPositiveButton("Got it",null).show();
+            }else toast(enable?"Thumb FPS ON • right re-grab shoots; two light taps ADS":"Thumb FPS OFF");
+        });
+        addMenu("Reset THUMB FPS layout",()->{
+            controls.resetThumbPositions();menuScroller.setVisibility(View.GONE);
+            toast("Two-thumb FPS positions restored");
+        });
+        addMenu("Optional: FPS claw controls",()->{
             boolean enable=!controls.fpsMode;
             controls.setFpsMode(enable);
             menuScroller.setVisibility(View.GONE);
@@ -121,7 +136,10 @@ public class MainActivity extends Activity {
         addMenu("Edit control positions",()->{controls.edit=!controls.edit; controls.game=true;
             controls.invalidate(); menuScroller.setVisibility(View.GONE);toast(controls.edit?"Drag buttons to move; tap to change key":"Layout saved");});
         addMenu("Show / Hide buttons",()->{controls.showButtons=!controls.showButtons; controls.save(); controls.invalidate();menuScroller.setVisibility(View.GONE);});
-        addMenu("Hide all UI (3 fingers to restore)",()->toggleHud());
+        addMenu("Hide all UI (3 fingers to restore)",()->{
+            if(controls.game){toast("Hide controls only in Desktop mode to avoid interrupting thumb controls");menuScroller.setVisibility(View.GONE);}
+            else toggleHud();
+        });
         addMenu("Show / Hide FPS text",()->{status.setVisibility(status.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);menuScroller.setVisibility(View.GONE);});
         addMenu("Button opacity +",()->{controls.opacity=Math.min(240,controls.opacity+25); controls.save();controls.invalidate();});
         addMenu("Button opacity −",()->{controls.opacity=Math.max(35,controls.opacity-25); controls.save();controls.invalidate();});
