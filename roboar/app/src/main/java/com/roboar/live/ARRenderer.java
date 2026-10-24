@@ -162,8 +162,8 @@ public class ARRenderer implements GLSurfaceView.Renderer {
     }
     // Each piece moves between a plausible automobile position and a humanoid-robot position.
     private void piece(float t,int mat,
-        float ax,float ay,float az,float aw,float ah,float ad,
-        float bx,float by,float bz,float bw,float bh,float bd) {
+        double ax,double ay,double az,double aw,double ah,double ad,
+        double bx,double by,double bz,double bw,double bh,double bd) {
         float x=lerp(ax,bx,t),y=lerp(ay,by,t),z=lerp(az,bz,t);
         float w=lerp(aw,bw,t),h=lerp(ah,bh,t),d=lerp(ad,bd,t);
         Matrix.setIdentityM(model,0);
@@ -184,7 +184,7 @@ public class ARRenderer implements GLSurfaceView.Renderer {
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,36);
         GLES20.glDisableVertexAttribArray(pos);
     }
-    private static float lerp(float a,float b,float t){return a+(b-a)*t;}
+    private static float lerp(double a,double b,float t){return (float)(a+(b-a)*t);}
     private void drawMech(float t){
         piece(t,1, 0,.58,0, 1.65,.32,3.65,  0,1.96,.04,1.28,.76,.72);
         piece(t,0, 0,.82,-1.23, 1.8,.28,1.53,  0,3.25,-.17,1.72,1.12,.78);
