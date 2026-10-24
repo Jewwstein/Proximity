@@ -260,11 +260,12 @@ public class RiftNet {
                 HttpsURLConnection connection=null;
                 try{
                     connection=open("/api/stream?v=2&token="+token,"GET");
-                    connection.setReadTimeout(0);streamConnection=connection;
+                    connection.setReadTimeout(2600);streamConnection=connection;
                     int streamCode=connection.getResponseCode();
                     if(streamCode==401){onUnauthorized();return;}
                     if(streamCode!=200)throw new IOException("Video HTTP "+streamCode);
                     long firstPTS=-1,firstArrival=-1,lastFeedbackTime=0,lastIDRRequest=0;
+                    int slowFrames=0;
                     boolean needKeyframe=true;
                     int lastWidth=0,lastHeight=0;
                     try(DataInputStream in=new DataInputStream(new BufferedInputStream(connection.getInputStream(),128*1024))){
@@ -293,8 +294,12 @@ public class RiftNet {
                             }
                             // A stale TCP buffer makes a beautiful but unplayably late
                             // desktop. Rejoin the live edge; the new stream requests an IDR.
-                            if(lag>290 && arrival-firstArrival>1200){
-                                throw new IOException("stream delay "+lag+"ms; catching up");
+                            // Let short Wi-Fi spikes recover without tearing down H264.
+                            // Only a sustained backlog causes a new live-edge connection.
+                            if(lag>900 && arrival-firstArrival>2000)slowFrames++;
+                            else slowFrames=0;
+                            if(slowFrames>15){
+                                throw new IOException("video backlog "+lag+" ms; requesting fresh live stream");
                             }
                             if(needKeyframe && !key)continue;
                             boolean accepted=decoder.frame(payload,key,micros,frameWidth,frameHeight);
@@ -309,7 +314,7 @@ public class RiftNet {
                     if(running&&streaming&&streamEpoch.get()==generation){
                         status.accept("Re-syncing live video: "+ex.getMessage());
                         decoder.reset();
-                        try{Thread.sleep(65);}catch(InterruptedException ignored){}
+                        try{Thread.sleep(230);}catch(InterruptedException ignored){}
                     }
                 }finally{
                     if(connection!=null)connection.disconnect();
