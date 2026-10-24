@@ -16,6 +16,7 @@ public class MainActivity extends Activity {
     TextureView video;
     ControlOverlay controls;
     RiftNet net;
+    PhoneBridge phoneBridge;
     StreamDecoder decoder;
     TextView status; Button menuButton, fitButton, keyboardButton; boolean hudHidden=false;
     EditText hostBox, pinBox;
@@ -153,6 +154,11 @@ public class MainActivity extends Activity {
         addMenu("Enlarge selected control",()->controls.resizeSelected(1.18f));
         addMenu("Shrink selected control",()->controls.resizeSelected(.84f));
         addMenu("Live keyboard • instant typing",this::typeOnPC);
+        addMenu("Choose phone folder for Windows dashboard",()->{
+            menuScroller.setVisibility(View.GONE);
+            if(phoneBridge==null){toast("Connect to your PC first");return;}
+            phoneBridge.pickSharedFolder();
+        });
         addMenu("Send file to PC",this::pickPhoneFile);
         addMenu("Download file from PC",this::showRemoteFiles);
         addMenu("PC file auto-sync on/off",()->{
@@ -337,6 +343,9 @@ public class MainActivity extends Activity {
                     connectionPanel.setVisibility(View.GONE);
                     controls.reset();controls.useXInput=gamepad;zoom=1;panX=0;panY=0;fitVideo();status.setText("Connecting video…");
                     net.connectInputs();
+                    if(phoneBridge!=null)phoneBridge.stop();
+                    phoneBridge=new PhoneBridge(MainActivity.this,net);
+                    phoneBridge.start();
                     startVideo();
                 });
             }
@@ -399,6 +408,9 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
+        if(request==PhoneBridge.PICK_SHARED_TREE && result==RESULT_OK && phoneBridge!=null){
+            phoneBridge.selectedTree(data);return;
+        }
         if(request==PICK_RIFTLINK_FILE&&result==RESULT_OK&&data!=null&&data.getData()!=null){
             net.uploadFile(data.getData(),this::showTransferMessage);
         }
@@ -417,7 +429,7 @@ public class MainActivity extends Activity {
     }
     void reconnect(){if(net!=null){stopDecoder();net.stopStream();startVideo();}}
     void stopDecoder(){if(decoder!=null){decoder.close();decoder=null;}}
-    void stopVideo(){if(liveKeyboard!=null)liveKeyboard.hide();stopDecoder();if(net!=null){net.stop();net=null;}}
+    void stopVideo(){if(liveKeyboard!=null)liveKeyboard.hide();if(phoneBridge!=null){phoneBridge.stop();phoneBridge=null;}stopDecoder();if(net!=null){net.stop();net=null;}}
     void editMapping(String name,String current){
         EditText key=new EditText(this);key.setSingleLine(true);key.setText(current);
         new AlertDialog.Builder(this).setTitle("Key for "+name)
