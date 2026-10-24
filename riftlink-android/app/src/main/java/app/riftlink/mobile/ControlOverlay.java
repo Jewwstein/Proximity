@@ -20,7 +20,12 @@ public final class ControlOverlay extends View {
     final HashSet<String> joystickDown=new HashSet<>();
     final Paint p=new Paint(3);
     boolean game=false,edit=false,showButtons=true,mouseHeld=false,useXInput=false,pinching=false;
-    boolean fpsMode=false,adsToggle=false,adsLatched=false;
+    boolean fpsMode=false,thumbMode=false,adsToggle=false,adsLatched=false;
+    // Right thumb: look normally; lift-and-regrab to shoot; two short taps to ADS.
+    boolean rightFiring=false,lastAimWasTap=false,aimMoved=false,regrabAfterTap=false,regrabActive=false;
+    long lastAimReleased=0,aimPressedAt=0;
+    float aimStartX=0,aimStartY=0;
+    Runnable pendingThumbFire=null;
     float lookSensitivity=1f;
     long lastLookTap=0;
     float lastPinchDistance=0,lastPinchCenterX=0,lastPinchCenterY=0;
@@ -37,11 +42,13 @@ public final class ControlOverlay extends View {
         setLayerType(View.LAYER_TYPE_SOFTWARE,null);
         game=prefs.getBoolean("game",false);
         fpsMode=prefs.getBoolean("fpsMode",false);
+        thumbMode=prefs.getBoolean("thumbMode",false);
+        if(thumbMode)fpsMode=false;
         adsToggle=prefs.getBoolean("adsToggle",false);
         lookSensitivity=prefs.getFloat("lookSensitivity",1f);
         opacity=prefs.getInt("opacity",135);
         showButtons=prefs.getBoolean("show",true);
-        defaults();if(fpsMode)fpsDefaults();restore();
+        defaults();if(fpsMode)fpsDefaults();if(thumbMode)thumbDefaults();restore();
     }
     void defaults(){
         buttons.clear();
@@ -77,13 +84,84 @@ public final class ControlOverlay extends View {
         buttons.add(new KeyButton("LB","Q",.30f,.29f,.056f));
         buttons.add(new KeyButton("RB","E",.71f,.29f,.056f));
     }
+    void thumbDefaults(){
+        buttons.clear();
+        // Both thumbs can stay on the controls during movement, aiming and firing.
+        buttons.add(new KeyButton("JOY","JOY",.17f,.75f,.19f));
+        buttons.add(new KeyButton("AIM","AIM",.80f,.75f,.19f));
+        // Optional convenience actions remain in the middle, not above either stick.
+        buttons.add(new KeyButton("A","SPACE",.48f,.75f,.052f));
+        buttons.add(new KeyButton("X","R",.48f,.91f,.050f));
+        buttons.add(new KeyButton("B","CTRL",.57f,.87f,.049f));
+    }
     void setFpsMode(boolean value){
-        cancelAll();
-        save();
-        fpsMode=value;game=true;edit=false;showButtons=true;
+        cancelAll();save();
+        thumbMode=false;fpsMode=value;game=true;edit=false;showButtons=true;
         defaults();if(fpsMode)fpsDefaults();restore();save();invalidate();
     }
+    void setThumbMode(boolean value){
+        cancelAll();save();
+        thumbMode=value;fpsMode=false;game=true;edit=false;showButtons=true;
+        defaults();if(thumbMode)thumbDefaults();restore();save();invalidate();
+    }
+    void startThumbAim(float x,float y,KeyButton b){
+        long now=SystemClock.uptimeMillis();
+        aimPressedAt=now;aimStartX=x;aimStartY=y;aimMoved=false;
+        regrabActive=lastAimReleased>0 && now-lastAimReleased<=315;
+        regrabAfterTap=regrabActive && lastAimWasTap;
+        cancelThumbFireTimer();
+        if(regrabActive){
+            if(regrabAfterTap){
+                // A second quick TAP means ADS; a second HOLD means FIRE.
+                pendingThumbFire=()->{
+                    if(fingers.containsValue(b) && !rightFiring)beginThumbFire();
+                };
+                ui.postDelayed(pendingThumbFire,155);
+            }else beginThumbFire();
+        }
+        aim(x,y,b);
+    }
+    void updateThumbAim(float x,float y,KeyButton b){
+        if(Math.abs(x-aimStartX)+Math.abs(y-aimStartY)>Math.max(18,getWidth()*.013f)){
+            aimMoved=true;
+            if(regrabAfterTap && regrabActive && !rightFiring){
+                cancelThumbFireTimer();
+                beginThumbFire();
+            }
+        }
+        aim(x,y,b);
+    }
+    void finishThumbAim(float x,float y){
+        long now=SystemClock.uptimeMillis();
+        cancelThumbFireTimer();
+        long held=now-aimPressedAt;
+        boolean shortTap=held<=145&&!aimMoved;
+        if(rightFiring){endThumbFire();}
+        else if(regrabAfterTap && shortTap){
+            adsLatched=!adsLatched;
+            sendButton("LT",adsLatched,"MOUSE_RIGHT");
+            // Don't interpret immediately looking around after ADS as a new fire regrab.
+            lastAimReleased=0;lastAimWasTap=false;regrabActive=false;regrabAfterTap=false;
+            invalidate();return;
+        }
+        lastAimReleased=now;lastAimWasTap=shortTap;
+        regrabActive=false;regrabAfterTap=false;
+        invalidate();
+    }
+    void beginThumbFire(){
+        if(rightFiring)return;
+        rightFiring=true;sendButton("RT",true,"MOUSE_LEFT");invalidate();
+    }
+    void endThumbFire(){
+        if(!rightFiring)return;
+        rightFiring=false;sendButton("RT",false,"MOUSE_LEFT");invalidate();
+    }
+    void cancelThumbFireTimer(){
+        if(pendingThumbFire!=null)ui.removeCallbacks(pendingThumbFire);
+        pendingThumbFire=null;
+    }
     void setAdsToggle(boolean value){
+        cancelThumbFireTimer();endThumbFire();lastAimReleased=0;lastAimWasTap=false;
         if(adsLatched){sendButton("LT",false,"MOUSE_RIGHT");adsLatched=false;}
         adsToggle=value;save();invalidate();
     }
@@ -105,7 +183,7 @@ public final class ControlOverlay extends View {
     }
     void restore(){
         try{
-            JSONArray ar=new JSONArray(prefs.getString(fpsMode?"fpsButtons":"buttons","[]"));
+            JSONArray ar=new JSONArray(prefs.getString(thumbMode?"thumbButtons":fpsMode?"fpsButtons":"buttons","[]"));
             for(int i=0;i<ar.length();i++){
                 JSONObject o=ar.getJSONObject(i);
                 String label=o.optString("label");
@@ -124,7 +202,8 @@ public final class ControlOverlay extends View {
             try{o.put("label",b.label);o.put("key",b.key);o.put("x",b.x);o.put("y",b.y);o.put("r",b.r);}catch(Exception ignored){}
             ar.put(o);
         }
-        prefs.edit().putString(fpsMode?"fpsButtons":"buttons",ar.toString()).putInt("opacity",opacity)
+        prefs.edit().putString(thumbMode?"thumbButtons":fpsMode?"fpsButtons":"buttons",ar.toString()).putInt("opacity",opacity)
+            .putBoolean("thumbMode",thumbMode)
             .putBoolean("fpsMode",fpsMode).putBoolean("adsToggle",adsToggle)
             .putFloat("lookSensitivity",lookSensitivity)
             .putBoolean("game",game).putBoolean("show",showButtons).apply();
@@ -140,13 +219,13 @@ public final class ControlOverlay extends View {
             sendButton("LT",adsLatched,b.key);
             return;
         }
-        if(fpsMode)sendButton(b.label,true,b.key);
+        if(fpsMode||thumbMode)sendButton(b.label,true,b.key);
         else if(useXInput)send.send("padDown",b.label,cursorX,cursorY);
         else press(b.key);
     }
     void releaseButton(KeyButton b){
         if(fpsMode && b.label.equals("LT") && adsToggle)return;
-        if(fpsMode)sendButton(b.label,false,b.key);
+        if(fpsMode||thumbMode)sendButton(b.label,false,b.key);
         else if(useXInput)send.send("padUp",b.label,cursorX,cursorY);
         else release(b.key);
     }
@@ -187,17 +266,25 @@ public final class ControlOverlay extends View {
         }
         if(!game||!showButtons)return;
         float shortSide=Math.min(getWidth(),getHeight());
+        if(thumbMode){
+            p.setColor(adsLatched?0xFF73FFBC:0xFFDBEAFE);
+            p.setTextAlign(Paint.Align.CENTER);
+            p.setTextSize(Math.max(12,shortSide*.022f));
+            c.drawText(adsLatched?"ADS ON • DOUBLE TAP LOOK TO RELEASE":"TWO-THUMB FPS • DOUBLE TAP LOOK FOR ADS",
+                getWidth()*.5f,getHeight()*.37f,p);
+        }
         for(KeyButton b:buttons){
             float cx=b.x*getWidth(),cy=b.y*getHeight(),r=b.r*shortSide;
             boolean active=fingers.containsValue(b)
-                ||(fpsMode&&b.label.equals("LT")&&adsToggle&&adsLatched);
+                ||(fpsMode&&b.label.equals("LT")&&adsToggle&&adsLatched)
+                ||(thumbMode&&b.label.equals("AIM")&&rightFiring);
             p.setColor(Color.argb(opacity,active?62:20,active?156:79,active?237:147));
             p.setStyle(Paint.Style.FILL);c.drawCircle(cx,cy,r,p);
             p.setColor(selected==b&&edit?Color.YELLOW:0xFFA7DDFF);p.setStrokeWidth(Math.max(2,shortSide*.003f));
             p.setStyle(Paint.Style.STROKE);c.drawCircle(cx,cy,r,p);
             p.setStyle(Paint.Style.FILL);p.setColor(Color.WHITE);p.setTextAlign(Paint.Align.CENTER);
             p.setTextSize(Math.max(12,shortSide*(b.label.equals("JOY")?.035f:.03f)));
-            String legend=b.label.equals("JOY")?"MOVE":b.label.equals("AIM")?"LOOK":
+            String legend=b.label.equals("JOY")?"MOVE":b.label.equals("AIM")?(thumbMode&&rightFiring?"FIRING":"LOOK"):
                 fpsMode&&b.label.equals("LT")?"ADS":
                 fpsMode&&b.label.equals("RT")?"FIRE":b.label;
             c.drawText(legend,cx,cy+shortSide*.010f,p);
@@ -279,7 +366,9 @@ public final class ControlOverlay extends View {
             if(hit!=null){
                 fingers.put(id,hit);
                 if(hit.key.equals("JOY"))joystick(x,y,hit);
-                else if(hit.key.equals("AIM"))aim(x,y,hit);
+                else if(hit.key.equals("AIM")){
+                    if(thumbMode)startThumbAim(x,y,hit);else aim(x,y,hit);
+                }
                 else pressButton(hit);
                 invalidate();return true;
             }
@@ -311,7 +400,9 @@ public final class ControlOverlay extends View {
                     invalidate();
                 }else if(fingers.containsKey(pid)){
                     KeyButton b=fingers.get(pid);if(b.key.equals("JOY"))joystick(px,py,b);
-                    else if(b.key.equals("AIM"))aim(px,py,b);
+                    else if(b.key.equals("AIM")){
+                        if(thumbMode)updateThumbAim(px,py,b);else aim(px,py,b);
+                    }
                 }else if(mousePointer==pid){
                     float dx=px-lastX,dy=py-lastY;
                     if(Math.abs(px-originX)+Math.abs(py-originY)>14){moved=true;if(holdTask!=null)ui.removeCallbacks(holdTask);}
@@ -333,6 +424,7 @@ public final class ControlOverlay extends View {
                     if(useXInput)send.send("padAxis","LEFT",.5f,.5f);
                     for(String key:joystickDown)release(key);joystickDown.clear();
                 }else if(b.key.equals("AIM")){
+                    if(thumbMode)finishThumbAim(x,y);
                     if(useXInput)send.send("padAxis","RIGHT",.5f,.5f);
                 }else releaseButton(b);invalidate();}
             if(id==mousePointer){
