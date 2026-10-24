@@ -20,9 +20,9 @@ jobs:
       - name: Compile Win64 official ViGEmClient DLL
         shell: pwsh
         run: |
-          $msbuild = & "$env:ProgramFiles(x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
+          $msbuild = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
           if (-not $msbuild) { throw "Visual Studio MSBuild unavailable" }
-          & $msbuild ViGEmClient.sln /t:Build /p:Configuration=Release_DLL /p:Platform=x64 /p:PlatformToolset=v142 /m
+          & $msbuild ViGEmClient.sln /t:Build /p:Configuration=Release_DLL /p:Platform=x64 /p:PlatformToolset=v143 /m
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $dll = Get-ChildItem -Recurse -Filter ViGEmClient.dll | Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
           if (-not $dll) { throw "ViGEmClient.dll missing" }
