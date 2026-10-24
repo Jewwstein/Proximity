@@ -36,8 +36,8 @@ final class StreamDecoder {
         }
         return out;
     }
-    synchronized void frame(byte[] packet,boolean key,long micros,int frameWidth,int frameHeight) {
-        if(closed)return;
+    synchronized boolean frame(byte[] packet,boolean key,long micros,int frameWidth,int frameHeight) {
+        if(closed)return false;
         try{
             if(frameWidth!=width || frameHeight!=height){
                 reset();
@@ -45,10 +45,10 @@ final class StreamDecoder {
                 status.accept("Adaptive video "+width+"×"+height);
             }
             if(decoder==null){
-                if(!key)return;
+                if(!key)return false;
                 byte[] sps=null,pps=null;
                 for(NAL n:nals(packet)){if(n.type==7)sps=n.bytes;else if(n.type==8)pps=n.bytes;}
-                if(sps==null||pps==null)return;
+                if(sps==null||pps==null)return false;
                 MediaFormat fmt=MediaFormat.createVideoFormat("video/avc",width,height);
                 fmt.setByteBuffer("csd-0",ByteBuffer.wrap(sps));
                 fmt.setByteBuffer("csd-1",ByteBuffer.wrap(pps));
@@ -70,9 +70,17 @@ final class StreamDecoder {
                     lastTimestamp=pts;
                     decoder.queueInputBuffer(idx,0,packet.length,pts,0);
                 }else{
-                    decoder.queueInputBuffer(idx,0,0,Math.max(0,micros),0);
-                    if(key)status.accept("Decoder buffer too small; awaiting next IDR");
+                    // Never inject an empty H264 sample in place of a real P frame.
+                    // Dropping one delta corrupts the rest of the GOP.
+                    reset();
+                    return false;
                 }
+            }
+            else {
+                // Decoder overload: we cannot skip a P frame and continue.
+                // Reset cleanly and ask the host for a fresh IDR.
+                reset();
+                return false;
             }
             MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
             // Drain all available frames; the latest surface output is what matters for responsiveness.
@@ -88,8 +96,10 @@ final class StreamDecoder {
                 status.accept(String.format(Locale.US,"RiftLink native • %.0f decoded fps • %d×%d",fps,width,height));
                 lastReport=now;frames=0;
             }
+            return true;
         }catch(Exception e){
             status.accept("Decoder restarting: "+e.getMessage());reset();
+            return false;
         }
     }
     synchronized void reset(){
