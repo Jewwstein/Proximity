@@ -73,8 +73,11 @@ public class RiftNet {
                     sock.setSoTimeout(5000);sock.startHandshake();
                     String fp=sha256(sock.getSession().getPeerCertificates()[0]);
                     fingerprint=fp;
-                    String old=activity.getPreferences(0).getString("trusted-"+host,"");
-                    cb.fingerprint(fp,fp.equals(old));
+                    android.content.SharedPreferences prefs=activity.getPreferences(0);
+                    String old=prefs.getString("trusted-"+host,"");
+                    // Same pinned Windows certificate may be reached by Wi-Fi IP or VPN IP.
+                    boolean samePairedComputer=!prefs.getString("token-cert-"+fp,"").isEmpty();
+                    cb.fingerprint(fp,fp.equals(old)||samePairedComputer);
                 }
             }catch(Exception ex){cb.error(ex.toString());}
         });
@@ -107,7 +110,8 @@ public class RiftNet {
                         if(code==200) info=new JSONObject(body(check.getInputStream()));
                         if(code==401){
                             token="";
-                            activity.getPreferences(0).edit().remove("token-"+host).apply();
+                            activity.getPreferences(0).edit().remove("token-"+host)
+                                .remove("token-cert-"+fingerprint).apply();
                         }else if(code!=200){
                             throw new IOException("PC responded HTTP "+code);
                         }
@@ -157,7 +161,8 @@ public class RiftNet {
         if(!authErrorShown.compareAndSet(false,true))return;
         streaming=false;
         audioStreaming=false;
-        activity.getPreferences(0).edit().remove("token-"+host).apply();
+        activity.getPreferences(0).edit().remove("token-"+host)
+            .remove("token-cert-"+fingerprint).apply();
         activity.runOnUiThread(()->{
             if(activity.net==this){
                 activity.showExpiredPairing();
