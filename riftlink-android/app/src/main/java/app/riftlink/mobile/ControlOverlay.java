@@ -189,14 +189,18 @@ public final class ControlOverlay extends View {
         float shortSide=Math.min(getWidth(),getHeight());
         for(KeyButton b:buttons){
             float cx=b.x*getWidth(),cy=b.y*getHeight(),r=b.r*shortSide;
-            boolean active=fingers.containsValue(b);
+            boolean active=fingers.containsValue(b)
+                ||(fpsMode&&b.label.equals("LT")&&adsToggle&&adsLatched);
             p.setColor(Color.argb(opacity,active?62:20,active?156:79,active?237:147));
             p.setStyle(Paint.Style.FILL);c.drawCircle(cx,cy,r,p);
             p.setColor(selected==b&&edit?Color.YELLOW:0xFFA7DDFF);p.setStrokeWidth(Math.max(2,shortSide*.003f));
             p.setStyle(Paint.Style.STROKE);c.drawCircle(cx,cy,r,p);
             p.setStyle(Paint.Style.FILL);p.setColor(Color.WHITE);p.setTextAlign(Paint.Align.CENTER);
             p.setTextSize(Math.max(12,shortSide*(b.label.equals("JOY")?.035f:.03f)));
-            c.drawText(b.label.equals("JOY")?"MOVE":b.label.equals("AIM")?"LOOK":b.label,cx,cy+shortSide*.010f,p);
+            String legend=b.label.equals("JOY")?"MOVE":b.label.equals("AIM")?"LOOK":
+                fpsMode&&b.label.equals("LT")?"ADS":
+                fpsMode&&b.label.equals("RT")?"FIRE":b.label;
+            c.drawText(legend,cx,cy+shortSide*.010f,p);
             if(edit&&b==selected){
                 p.setTextSize(shortSide*.020f);c.drawText(b.key,cx,cy+r+shortSide*.025f,p);
             }
