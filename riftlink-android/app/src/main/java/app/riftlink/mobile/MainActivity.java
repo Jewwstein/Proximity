@@ -410,6 +410,33 @@ public class MainActivity extends Activity {
         float newZoom=Math.max(1f,Math.min(5f,zoom*factor));
         if(newZoom==1f){panX=0;panY=0;}zoom=newZoom;fitVideo();
     }
+    float scrollAccumulator=0f;
+    void twoFingerScroll(float dy){
+        if(net==null)return;
+        scrollAccumulator+=dy;
+        if(Math.abs(scrollAccumulator)>=15f){
+            int steps=(int)(scrollAccumulator/15f);
+            net.scroll(steps*120);
+            scrollAccumulator-=steps*15f;
+        }
+    }
+    void followCursor(float cx,float cy){
+        if(zoom<=1.01f||video==null||controls==null||controls.game)return;
+        float w=video.getWidth(),h=video.getHeight();
+        if(w<=0||h<=0)return;
+        float aspect=(float)desktopWidth/Math.max(1,desktopHeight);
+        float drawnW=(w/h)>aspect?h*aspect:w;
+        float drawnH=(w/h)>aspect?h:w/aspect;
+        float x=w/2f+(cx-.5f)*drawnW*zoom+panX;
+        float y=h/2f+(cy-.5f)*drawnH*zoom+panY;
+        float dx=0,dy=0;
+        if(x<w*.16f)dx=Math.min(25,w*.16f-x);
+        if(x>w*.84f)dx=-Math.min(25,x-w*.84f);
+        if(y<h*.16f)dy=Math.min(25,h*.16f-y);
+        if(y>h*.84f)dy=-Math.min(25,y-h*.84f);
+        if(dx!=0||dy!=0)panZoom(dx,dy);
+    }
+
     void panZoom(float dx,float dy){
         if(zoom<=1f)return;
         panX=Math.max(-video.getWidth()*(zoom-1)/2f,Math.min(video.getWidth()*(zoom-1)/2f,panX+dx));
