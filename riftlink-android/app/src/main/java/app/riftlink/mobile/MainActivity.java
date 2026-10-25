@@ -24,13 +24,15 @@ public class MainActivity extends Activity {
     float zoom=1f, panX=0f, panY=0f; boolean audioEnabled=true;
     int desktopWidth=1920,desktopHeight=1080;
     Handler ui = new Handler(Looper.getMainLooper());
+    RiftLinkUpgrade upgrade;
+
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         immersive();
         root=new FrameLayout(this);
-        root.setBackgroundColor(Color.rgb(5,9,18));
+        root.setBackgroundColor(Color.BLACK);
         video=new TextureView(this);
         video.setSurfaceTextureListener(new TextureView.SurfaceTextureListener(){
             public void onSurfaceTextureAvailable(SurfaceTexture t,int w,int h){ fitVideo(); }
@@ -45,7 +47,7 @@ public class MainActivity extends Activity {
         root.addView(controls,new FrameLayout.LayoutParams(-1,-1));
         status=new TextView(this);
         status.setTextColor(Color.WHITE);
-        status.setBackgroundColor(0x99050813);
+        status.setBackgroundColor(0xDB000000);
         status.setTextSize(11);
         status.setText("RiftLink");
         FrameLayout.LayoutParams sl=new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.LEFT);
@@ -69,6 +71,7 @@ public class MainActivity extends Activity {
             if(liveKeyboard!=null && liveKeyboard.isShowing())liveKeyboard.hide();
             else typeOnPC();
         });
+        upgrade=new RiftLinkUpgrade(this);
         createMenu();
         createConnectionPanel();
         liveKeyboard=new LiveKeyboardPanel(this,root,this::toast);
@@ -93,12 +96,17 @@ public class MainActivity extends Activity {
     int dp(int n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}
     Button button(String t){
         Button b=new Button(this);b.setText(t);b.setTextColor(Color.WHITE);
-        b.setTextSize(13); b.setAllCaps(false); b.setBackgroundTintList(
-          android.content.res.ColorStateList.valueOf(0xFF17345B));return b;
+        b.setTextSize(13); b.setAllCaps(false);
+        android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable();
+        bg.setColor(0xFF07121E);bg.setCornerRadius(dp(12));bg.setStroke(dp(1),0xFF278CD6);
+        b.setBackground(bg);b.setElevation(dp(3));return b;
     }
     void createMenu(){
         menu=new LinearLayout(this);menu.setOrientation(LinearLayout.VERTICAL);
-        menu.setPadding(dp(6),dp(6),dp(6),dp(6));menu.setBackgroundColor(0xEA071626);
+        menu.setPadding(dp(6),dp(6),dp(6),dp(6));menu.setBackgroundColor(0xF9000307);
+        addMenu("Game Mode • launch PC games",()->upgrade.showGameLibrary());
+        addMenu("Desktop Mode • original controls",()->upgrade.desktop());
+        addMenu("Switch RiftLink PC",()->upgrade.discover(false));
         addMenu("Screen rotation • Auto / Portrait / Landscape",this::chooseOrientation);
         addMenu("Desktop / Controller",()->{
             controls.cancelAll();
@@ -270,13 +278,28 @@ public class MainActivity extends Activity {
     }
     void toggleMenu(){menuScroller.setVisibility(menuScroller.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);}
     void createConnectionPanel(){
-        connectionPanel=new FrameLayout(this);connectionPanel.setBackgroundColor(0xF5071220);
+        connectionPanel=new FrameLayout(this);connectionPanel.setBackgroundColor(0xFA000000);
         LinearLayout col=new LinearLayout(this);col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(dp(22),dp(20),dp(22),dp(20));col.setBackgroundColor(0xFF10233F);
-        TextView title=new TextView(this);title.setText("RIFTLINK  •  NATIVE ANDROID"); title.setTextColor(Color.WHITE);title.setTextSize(20);
+        col.setPadding(dp(22),dp(20),dp(22),dp(20));col.setBackgroundColor(0xFF080D13);
+        TextView title=new TextView(this);title.setText("RIFTLINK   /   STUDIO"); title.setTextColor(0xFFE9F5FF);title.setTextSize(22);
+        title.setShadowLayer(dp(7),0,dp(2),0xFF168CFF);
         col.addView(title);
-        TextView sub=new TextView(this);sub.setText("Enter your PC IP on Wi-Fi or your secure private VPN. The port is filled automatically.");
+        TextView sub=new TextView(this);sub.setText("Your V2.2 fast streaming, full FPS controls, keyboard and audio — now with automatic PC pairing.");
         sub.setTextColor(0xFFBBCAE4);sub.setTextSize(12);col.addView(sub);
+        TextView modeTitle=new TextView(this);
+        modeTitle.setText("  YOUR RIFTLINK SESSIONS");
+        modeTitle.setTextColor(0xFF2C9EFF);modeTitle.setPadding(0,dp(14),0,dp(8));
+        col.addView(modeTitle);
+        Button desktop=button("DESKTOP MODE     •     Find PCs");
+        col.addView(desktop);
+        desktop.setOnClickListener(v->upgrade.discover(false));
+        Button gaming=button("GAME MODE       •     Find PC games");
+        col.addView(gaming);
+        gaming.setOnClickListener(v->upgrade.discover(true));
+        TextView manual=new TextView(this);
+        manual.setText("Advanced connection • IP address / older host PIN");
+        manual.setTextColor(0xFF8DA8BD);manual.setPadding(0,dp(14),0,dp(2));
+        col.addView(manual);
         hostBox=new EditText(this);hostBox.setSingleLine(true);hostBox.setTextColor(Color.WHITE);
         hostBox.setHintTextColor(0xFF99B2CF);hostBox.setHint("PC IP only — no colon or port needed");
         hostBox.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
@@ -347,6 +370,7 @@ public class MainActivity extends Activity {
                     phoneBridge=new PhoneBridge(MainActivity.this,net);
                     phoneBridge.start();
                     startVideo();
+                    upgrade.afterConnected();
                 });
             }
             public void error(String error){runOnUiThread(()->{status.setText("Connect failed: "+error);toast(error);});}
@@ -429,7 +453,7 @@ public class MainActivity extends Activity {
     }
     void reconnect(){if(net!=null){stopDecoder();net.stopStream();startVideo();}}
     void stopDecoder(){if(decoder!=null){decoder.close();decoder=null;}}
-    void stopVideo(){if(liveKeyboard!=null)liveKeyboard.hide();if(phoneBridge!=null){phoneBridge.stop();phoneBridge=null;}stopDecoder();if(net!=null){net.stop();net=null;}}
+    void stopVideo(){if(upgrade!=null)upgrade.stop();if(liveKeyboard!=null)liveKeyboard.hide();if(phoneBridge!=null){phoneBridge.stop();phoneBridge=null;}stopDecoder();if(net!=null){net.stop();net=null;}}
     void editMapping(String name,String current){
         EditText key=new EditText(this);key.setSingleLine(true);key.setText(current);
         new AlertDialog.Builder(this).setTitle("Key for "+name)
