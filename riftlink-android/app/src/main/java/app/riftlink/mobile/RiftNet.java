@@ -264,10 +264,14 @@ public class RiftNet {
             try{if(inputSocket!=null)inputSocket.close();}catch(Exception ignored){}
         }
     }
+    volatile long lastVideoPacketAtMs=0;
+    volatile long lastVideoConnectedAtMs=0;
     final java.util.concurrent.atomic.AtomicInteger streamEpoch=new java.util.concurrent.atomic.AtomicInteger();
     // An epoch prevents an older reconnect loop from stealing the new stream.
     void startStream(StreamDecoder decoder,Consumer<String> status,Consumer<int[]> resolutionChange){
         final int generation=streamEpoch.incrementAndGet();
+        lastVideoPacketAtMs=0;
+        lastVideoConnectedAtMs=SystemClock.elapsedRealtime();
         streaming=true;
         work.execute(()->{
             while(running&&streaming&&streamEpoch.get()==generation){
@@ -280,6 +284,7 @@ public class RiftNet {
                     int streamCode=connection.getResponseCode();
                     if(streamCode==401){onUnauthorized();return;}
                     if(streamCode!=200)throw new IOException("Video HTTP "+streamCode);
+                    lastVideoConnectedAtMs=SystemClock.elapsedRealtime();
                     long firstPTS=-1,firstArrival=-1,lastFeedbackTime=0,lastIDRRequest=0;
                     int slowFrames=0;
                     long backlogSince=0;
@@ -295,6 +300,8 @@ public class RiftNet {
                                 throw new IOException("Invalid video frame header");
                             byte[] payload=new byte[len];in.readFully(payload);
                             long arrival=SystemClock.elapsedRealtime();
+                            if(streamEpoch.get()!=generation || !streaming)break;
+                            lastVideoPacketAtMs=arrival;
                             if(lastWidth!=frameWidth||lastHeight!=frameHeight){
                                 lastWidth=frameWidth;lastHeight=frameHeight;
                                 resolutionChange.accept(new int[]{frameWidth,frameHeight});
@@ -324,7 +331,15 @@ public class RiftNet {
                             if(slowFrames>90 && backlogSince>0 && arrival-backlogSince>2500){
                                 throw new IOException("sustained video backlog "+lag+" ms; resyncing live edge");
                             }
-                            if(needKeyframe && !key)continue;
+                            if(needKeyframe && !key){
+                                // Resolution changes and stream restarts need a fresh IDR.
+                                // Request it even when no decoder frame has been accepted.
+                                if(arrival-lastIDRRequest>750){
+                                    input("keyframe","",0,0);
+                                    lastIDRRequest=arrival;
+                                }
+                                continue;
+                            }
                             boolean accepted=decoder.frame(payload,key,micros,frameWidth,frameHeight);
                             needKeyframe=!accepted;
                             if(!accepted && arrival-lastIDRRequest>450){
@@ -344,6 +359,7 @@ public class RiftNet {
                     }
                 }finally{
                     if(connection!=null)connection.disconnect();
+                    if(streamConnection==connection)streamConnection=null;
                 }
             }
         });
@@ -468,7 +484,13 @@ public class RiftNet {
             }
         });
     }
-    void stopStream(){streaming=false;streamEpoch.incrementAndGet();if(streamConnection!=null)streamConnection.disconnect();}
+    void stopStream(){
+        streaming=false;
+        streamEpoch.incrementAndGet();
+        HttpsURLConnection old=streamConnection;
+        streamConnection=null;
+        if(old!=null)old.disconnect();
+    }
     void stop(){
         input("up","",0.5f,0.5f);
         input("releaseAllKeys","",0.5f,0.5f);
