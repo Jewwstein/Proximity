@@ -202,6 +202,15 @@ public class RiftNet {
         }
     }
     void connectInputs(){inputWork.execute(this::connectSocket);}
+    void scroll(int wheel){
+        if(!running||wheel==0)return;
+        try{
+            JSONObject payload=new JSONObject();
+            payload.put("a","scroll");payload.put("d",Math.max(-2400,Math.min(2400,wheel)));
+            byte[] data=payload.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            inputWork.execute(()->sendInputPayload(data));
+        }catch(Exception ignored){}
+    }
     void input(String action,String key,float x,float y){
         if(!running)return;
         JSONObject obj=new JSONObject();
