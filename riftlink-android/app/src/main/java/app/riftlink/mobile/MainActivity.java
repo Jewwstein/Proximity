@@ -156,6 +156,15 @@ public class MainActivity extends Activity {
         addMenu("Show / Hide FPS text",()->{status.setVisibility(status.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);menuScroller.setVisibility(View.GONE);});
         addMenu("Button opacity +",()->{controls.opacity=Math.min(240,controls.opacity+25); controls.save();controls.invalidate();});
         addMenu("Button opacity −",()->{controls.opacity=Math.max(35,controls.opacity-25); controls.save();controls.invalidate();});
+        addMenu("Test mouse-wheel scrolling",()->{
+            menuScroller.setVisibility(View.GONE);
+            if(net==null){toast("Connect to PC first");return;}
+            new AlertDialog.Builder(this).setTitle("RiftLink scroll diagnostic")
+              .setMessage("Choose a direction to send a real Windows mouse-wheel event. If this works, the host and input protocol are working.")
+              .setPositiveButton("Scroll down",(dialog,which)->net.scroll(-360))
+              .setNegativeButton("Scroll up",(dialog,which)->net.scroll(360))
+              .setNeutralButton("Cancel",null).show();
+        });
         addMenu("Zoom +",()->{onPinch(1.25f);});
         addMenu("Zoom −",()->{onPinch(.8f);});
         addMenu("Fit screen",()->{zoom=1f;panX=0;panY=0;fitVideo();menuScroller.setVisibility(View.GONE);});
