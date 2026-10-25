@@ -24,6 +24,13 @@ public class MainActivity extends Activity {
     float zoom=1f, panX=0f, panY=0f; boolean audioEnabled=true;
     int desktopWidth=1920,desktopHeight=1080;
     Handler ui = new Handler(Looper.getMainLooper());
+    // Only one active video session may own a TextureView surface. These fields
+    // are controlled on the Android UI thread; input/audio remain independent.
+    long videoSessionGeneration=0;
+    RiftNet videoSessionNet;
+    Runnable videoWatchdog;
+    long videoSessionStartedAtMs=0;
+    volatile long lastUserInteractionAtMs=0;
     RiftLinkUpgrade upgrade;
 
 
@@ -35,13 +42,25 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.BLACK);
         video=new TextureView(this);
         video.setSurfaceTextureListener(new TextureView.SurfaceTextureListener(){
-            public void onSurfaceTextureAvailable(SurfaceTexture t,int w,int h){ fitVideo(); }
+            public void onSurfaceTextureAvailable(SurfaceTexture t,int w,int h){
+                fitVideo();
+                // Android can recreate the TextureView during a mode/orientation
+                // transition. Resume video automatically, retaining input/audio.
+                if(net!=null && net.running && !net.token.isEmpty()
+                    && videoSessionNet==null)startVideo();
+            }
             public void onSurfaceTextureSizeChanged(SurfaceTexture t,int w,int h){ fitVideo(); }
-            public boolean onSurfaceTextureDestroyed(SurfaceTexture t){ stopVideo(); return true; }
+            public boolean onSurfaceTextureDestroyed(SurfaceTexture t){
+                // Do NOT discard pairing, input, audio or the selected PC when a
+                // TextureView surface is temporarily destroyed.
+                stopVideoPipeline();
+                return true;
+            }
             public void onSurfaceTextureUpdated(SurfaceTexture t){}
         });
         root.addView(video,new FrameLayout.LayoutParams(-1,-1));
         controls=new ControlOverlay(this, (action,key,x,y)->{
+            lastUserInteractionAtMs=SystemClock.elapsedRealtime();
             if(net!=null) net.input(action,key,x,y);
         }, (name,key)->editMapping(name,key));
         root.addView(controls,new FrameLayout.LayoutParams(-1,-1));
@@ -351,7 +370,7 @@ public class MainActivity extends Activity {
     void showExpiredPairing(){
         // Do not endlessly retry streams with rejected credentials.
         if(liveKeyboard!=null)liveKeyboard.hide();
-        stopDecoder();
+        stopVideoPipeline();
         connectionPanel.setVisibility(View.VISIBLE);
         pinBox.setText("");
         status.setText("Pairing expired — enter the PC PIN once");
@@ -361,47 +380,147 @@ public class MainActivity extends Activity {
         if(liveKeyboard!=null && liveKeyboard.isShowing())liveKeyboard.hide();
     }
     void startAuthorizedConnection(){
+        final RiftNet candidate=net;
+        if(candidate==null)return;
         status.setText("Pairing and checking video…");
         String pin=pinBox.getText().toString().trim();
-        String savedHost=hostBox.getText().toString().trim();
-        String savedToken=getPreferences(0).getString("token-cert-"+net.fingerprint,"");
-        if(savedToken.isEmpty())savedToken=getPreferences(0).getString("token-"+net.host,"");
-        net.authenticate(pin,savedToken,new RiftNet.AuthListener(){
+        String savedToken=getPreferences(0).getString("token-cert-"+candidate.fingerprint,"");
+        if(savedToken.isEmpty())savedToken=getPreferences(0).getString("token-"+candidate.host,"");
+        candidate.authenticate(pin,savedToken,new RiftNet.AuthListener(){
             public void complete(String token,int w,int h,boolean gamepad){
                 runOnUiThread(()->{
+                    // A previous PC's asynchronous authorization must not
+                    // seize a newly selected connection or video surface.
+                    if(net!=candidate || !candidate.running || isFinishing())return;
                     desktopWidth=w;desktopHeight=h;
-                    getPreferences(0).edit().putString("token-"+net.host,token)
-                        .putString("token-cert-"+net.fingerprint,token).apply();
+                    getPreferences(0).edit().putString("token-"+candidate.host,token)
+                        .putString("token-cert-"+candidate.fingerprint,token).apply();
                     connectionPanel.setVisibility(View.GONE);
-                    controls.reset();controls.useXInput=gamepad;zoom=1;panX=0;panY=0;fitVideo();status.setText("Connecting video…");
-                    net.connectInputs();
+                    controls.reset();controls.useXInput=gamepad;
+                    zoom=1;panX=0;panY=0;fitVideo();
+                    status.setText("Connecting video…");
+                    candidate.connectInputs();
                     if(phoneBridge!=null)phoneBridge.stop();
-                    phoneBridge=new PhoneBridge(MainActivity.this,net);
+                    phoneBridge=new PhoneBridge(MainActivity.this,candidate);
                     phoneBridge.start();
+                    // Audio/file transfer start once per authorized PC. A
+                    // video-only recovery must never restart or multiply them.
                     startVideo();
+                    candidate.startFileAutoSync(this::showTransferMessage);
+                    if(audioEnabled)candidate.startAudio(
+                        msg->runOnUiThread(()->{
+                            if(net==candidate)status.setText(msg);
+                        }));
                     upgrade.afterConnected();
                 });
             }
-            public void error(String error){runOnUiThread(()->{status.setText("Connect failed: "+error);toast(error);});}
+            public void error(String error){
+                runOnUiThread(()->{
+                    if(net==candidate){status.setText("Connect failed: "+error);toast(error);}
+                });
+            }
         });
     }
-    void startVideo(){
-        if(net==null)return;
-        if(!video.isAvailable()){ui.postDelayed(this::startVideo,120);return;}
+
+    void stopVideoPipeline(){
+        // Stop the old socket reader FIRST; only then release MediaCodec/Surface.
+        videoSessionGeneration++;
+        if(videoWatchdog!=null)ui.removeCallbacks(videoWatchdog);
+        videoWatchdog=null;
+        RiftNet previous=videoSessionNet;
+        videoSessionNet=null;
+        if(previous!=null)previous.stopStream();
         stopDecoder();
-        decoder=new StreamDecoder(new Surface(video.getSurfaceTexture()),desktopWidth,desktopHeight,
-            s->runOnUiThread(()->status.setText(s)));
-        net.startStream(decoder,
-            message->runOnUiThread(()->status.setText(message)),
-            size->runOnUiThread(()->{
-                if(desktopWidth!=size[0]||desktopHeight!=size[1]){
-                    desktopWidth=size[0];desktopHeight=size[1];
-                    fitVideo();
-                }
-            }));
-        net.startFileAutoSync(this::showTransferMessage);
-        if(audioEnabled)net.startAudio(s->runOnUiThread(()->status.setText(s)));
     }
+
+    void startVideo(){
+        if(Looper.myLooper()!=Looper.getMainLooper()){
+            runOnUiThread(this::startVideo);return;
+        }
+        final RiftNet target=net;
+        if(target==null||!target.running||target.token.isEmpty())return;
+        stopVideoPipeline();
+        final long generation=videoSessionGeneration;
+        if(video==null||!video.isAvailable()){
+            // Keep the selected PC and controls alive while Android recreates
+            // its display surface. A stale delayed retry must never win.
+            ui.postDelayed(()->{
+                if(net==target && videoSessionGeneration==generation)
+                    startVideo();
+            },300);
+            return;
+        }
+        try {
+            final StreamDecoder next=new StreamDecoder(
+                new Surface(video.getSurfaceTexture()),desktopWidth,desktopHeight,
+                msg->runOnUiThread(()->{
+                    if(net==target && videoSessionGeneration==generation)
+                        status.setText(msg);
+                }));
+            decoder=next;
+            videoSessionNet=target;
+            videoSessionStartedAtMs=SystemClock.elapsedRealtime();
+            target.startStream(next,
+                msg->runOnUiThread(()->{
+                    if(net==target && videoSessionGeneration==generation)
+                        status.setText(msg);
+                }),
+                size->runOnUiThread(()->{
+                    if(net!=target||videoSessionGeneration!=generation)return;
+                    if(desktopWidth!=size[0]||desktopHeight!=size[1]){
+                        desktopWidth=size[0];desktopHeight=size[1];
+                        fitVideo();
+                    }
+                }));
+            startVideoWatchdog(target,next,generation);
+        }catch(Exception e){
+            status.setText("Video surface unavailable: "+e.getMessage());
+            stopVideoPipeline();
+            // Only video is affected; input and audio remain connected.
+        }
+    }
+
+    void startVideoWatchdog(final RiftNet target,final StreamDecoder active,final long generation){
+        videoWatchdog=new Runnable(){
+            @Override public void run(){
+                if(net!=target||!target.running||!target.streaming ||
+                   videoSessionGeneration!=generation || decoder!=active ||
+                   !video.isAvailable())return;
+                long now=SystemClock.elapsedRealtime();
+                long lastRendered=active.lastPresentedAtMs;
+                long lastPacket=target.lastVideoPacketAtMs;
+                long sessionAge=now-videoSessionStartedAtMs;
+                boolean noFirstFrame=lastRendered==0 && sessionAge>13000;
+                boolean inputActive=lastUserInteractionAtMs>0 &&
+                    now-lastUserInteractionAtMs<13000;
+                boolean freshPackets=lastPacket>0 && now-lastPacket<9500;
+                boolean pictureStale=lastRendered>0 && now-lastRendered>11000;
+                // A static desktop can legitimately remain unchanged. Recover
+                // only when the decoder is not producing despite active frames
+                // or recent user input; never drop video for an idle scene.
+                boolean videoFrozen=pictureStale&&(inputActive||freshPackets);
+                if(noFirstFrame||videoFrozen){
+                    status.setText("Restoring RiftLink video • controls stay connected");
+                    startVideo();
+                    return;
+                }
+                ui.postDelayed(this,2200);
+            }
+        };
+        ui.postDelayed(videoWatchdog,2200);
+    }
+
+    /** Called when Desktop/Game Mode changes without switching to another PC. */
+    void ensureVideoAlive(){
+        if(Looper.myLooper()!=Looper.getMainLooper()){
+            runOnUiThread(this::ensureVideoAlive);return;
+        }
+        if(net!=null&&net.running&&!net.token.isEmpty()&&
+           video!=null&&video.isAvailable()&&
+           (decoder==null||videoSessionNet!=net))
+            startVideo();
+    }
+
     void fitVideo(){
         if(video==null||video.getWidth()==0)return;
         float viewW=video.getWidth(),viewH=video.getHeight();
@@ -487,9 +606,20 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Cancel",null).show();
         }));
     }
-    void reconnect(){if(net!=null){stopDecoder();net.stopStream();startVideo();}}
+    void reconnect(){
+        if(net!=null&&!net.token.isEmpty()){
+            status.setText("Reconnecting video only • controls stay live");
+            startVideo();
+        }
+    }
     void stopDecoder(){if(decoder!=null){decoder.close();decoder=null;}}
-    void stopVideo(){if(upgrade!=null)upgrade.stop();if(liveKeyboard!=null)liveKeyboard.hide();if(phoneBridge!=null){phoneBridge.stop();phoneBridge=null;}stopDecoder();if(net!=null){net.stop();net=null;}}
+    void stopVideo(){
+        stopVideoPipeline();
+        if(upgrade!=null)upgrade.stop();
+        if(liveKeyboard!=null)liveKeyboard.hide();
+        if(phoneBridge!=null){phoneBridge.stop();phoneBridge=null;}
+        if(net!=null){RiftNet departing=net;net=null;departing.stop();}
+    }
     void editMapping(String name,String current){
         EditText key=new EditText(this);key.setSingleLine(true);key.setText(current);
         new AlertDialog.Builder(this).setTitle("Key for "+name)
