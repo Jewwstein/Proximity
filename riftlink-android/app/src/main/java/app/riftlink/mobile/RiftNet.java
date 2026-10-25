@@ -274,12 +274,15 @@ public class RiftNet {
                 HttpsURLConnection connection=null;
                 try{
                     connection=open("/api/stream?v=2&token="+token,"GET");
-                    connection.setReadTimeout(2600);streamConnection=connection;
+                    // Allow brief GPU encoder pauses and Wi-Fi bursts without dropping video.
+                    // Input remains on its own independent WebSocket.
+                    connection.setReadTimeout(12000);streamConnection=connection;
                     int streamCode=connection.getResponseCode();
                     if(streamCode==401){onUnauthorized();return;}
                     if(streamCode!=200)throw new IOException("Video HTTP "+streamCode);
                     long firstPTS=-1,firstArrival=-1,lastFeedbackTime=0,lastIDRRequest=0;
                     int slowFrames=0;
+                    long backlogSince=0;
                     boolean needKeyframe=true;
                     int lastWidth=0,lastHeight=0;
                     try(DataInputStream in=new DataInputStream(new BufferedInputStream(connection.getInputStream(),128*1024))){
@@ -310,10 +313,16 @@ public class RiftNet {
                             // desktop. Rejoin the live edge; the new stream requests an IDR.
                             // Let short Wi-Fi spikes recover without tearing down H264.
                             // Only a sustained backlog causes a new live-edge connection.
-                            if(lag>900 && arrival-firstArrival>2000)slowFrames++;
-                            else slowFrames=0;
-                            if(slowFrames>15){
-                                throw new IOException("video backlog "+lag+" ms; requesting fresh live stream");
+                            if(lag>1600 && arrival-firstArrival>2500){
+                                slowFrames++;
+                                if(backlogSince==0)backlogSince=arrival;
+                            }else{
+                                slowFrames=0;backlogSince=0;
+                            }
+                            // Rejoin only after a sustained multi-second backlog, not
+                            // a momentary burst of delayed H.264 packets.
+                            if(slowFrames>90 && backlogSince>0 && arrival-backlogSince>2500){
+                                throw new IOException("sustained video backlog "+lag+" ms; resyncing live edge");
                             }
                             if(needKeyframe && !key)continue;
                             boolean accepted=decoder.frame(payload,key,micros,frameWidth,frameHeight);
@@ -326,9 +335,12 @@ public class RiftNet {
                     }
                 }catch(Exception ex){
                     if(running&&streaming&&streamEpoch.get()==generation){
-                        status.accept("Re-syncing live video: "+ex.getMessage());
+                        String reason=ex instanceof java.net.SocketTimeoutException?
+                            "Video stalled; reconnecting decoder (controls remain live)":
+                            "Resyncing video: "+ex.getMessage();
+                        status.accept(reason);
                         decoder.reset();
-                        try{Thread.sleep(230);}catch(InterruptedException ignored){}
+                        try{Thread.sleep(450);}catch(InterruptedException ignored){Thread.currentThread().interrupt();}
                     }
                 }finally{
                     if(connection!=null)connection.disconnect();
