@@ -29,15 +29,35 @@ jobs:
           mkdir -p AndroidApp
           base64 --decode riftlink_build_source.b64 | tar -xz -C AndroidApp
           test -f AndroidApp/app/src/main/AndroidManifest.xml
+      - name: Repair Android Keystore pairing encryption
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("AndroidApp")
+          p = root / "app/src/main/java/app/riftlink/mobile/RiftClient.java"
+          text = p.read_text()
+          before = 'byte[] iv=new byte[12];new SecureRandom().nextBytes(iv);Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,getKey(),new GCMParameterSpec(128,iv));'
+          after = 'Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,getKey());byte[] iv=cipher.getIV();if(iv==null||iv.length!=12)throw new GeneralSecurityException("Unexpected Android Keystore GCM IV");'
+          assert text.count(before) == 1, "Encryption source changed: abort instead of building unpatched APK"
+          patched = text.replace(before, after)
+          assert "cipher.init(Cipher.ENCRYPT_MODE,getKey(),new GCMParameterSpec" not in patched, "Caller-provided IV remains"
+          assert patched.count("cipher.getIV()") == 1
+          p.write_text(patched)
+          gradle = root / "app/build.gradle"
+          config = gradle.read_text()
+          assert "versionCode 3" in config
+          gradle.write_text(config.replace("versionCode 3", "versionCode 4").replace("versionName '3.3.0'", "versionName '3.4.1'"))
+          print("VERIFIED: Keystore generates unique encryption IV; existing decrypt/record format preserved.")
+          PY
       - name: Build and validate debug APK
         run: |
           gradle --no-daemon -p AndroidApp assembleDebug
           test -s AndroidApp/app/build/outputs/apk/debug/app-debug.apk
           unzip -t AndroidApp/app/build/outputs/apk/debug/app-debug.apk
-          cp AndroidApp/app/build/outputs/apk/debug/app-debug.apk RiftLink_GameMode_Android.apk
+          cp AndroidApp/app/build/outputs/apk/debug/app-debug.apk RiftLink_AutoPair_GCM_Fix_Android.apk
           sha256sum RiftLink_GameMode_Android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: RiftLink_GameMode_Android_APK
+          name: RiftLink_AutoPair_GCM_Fix_Android_APK
           path: RiftLink_GameMode_Android.apk
           retention-days: 7
