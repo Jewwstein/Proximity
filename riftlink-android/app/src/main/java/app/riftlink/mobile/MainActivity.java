@@ -120,8 +120,8 @@ public class MainActivity extends Activity {
             controls.setThumbMode(enable);
             menuScroller.setVisibility(View.GONE);
             if(enable && !controls.useXInput){
-                new AlertDialog.Builder(this).setTitle("Two-thumb shooter mode enabled")
-                    .setMessage("MOVE with left thumb and LOOK with right. Lift and quickly re-touch the LOOK stick to FIRE while dragging. Two short taps toggle ADS.\n\nYour Windows host has not reported an Xbox gamepad, so real held ADS and shooter-style camera motion may require enabling the bundled Xbox controller in RiftLink Control Center.")
+                new AlertDialog.Builder(this).setTitle("Two-thumb FPS • complete controls")
+                    .setMessage("LEFT STICK: move; double tap to toggle ADS.\nRIGHT STICK: aim; double tap to toggle FIRE.\nYou can keep both thumbs on the sticks during play.\n\nJump, slide, reload, interact, shoulder controls, stick-clicks, Start and Back are also on screen.\n\nEnable Xbox gamepad support on the PC for held triggers and full analog movement.")
                     .setPositiveButton("Got it",null).show();
             }else toast(enable?"Thumb FPS ON • right re-grab shoots; two light taps ADS":"Thumb FPS OFF");
         });
