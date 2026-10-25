@@ -59,7 +59,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: RiftLink_AutoPair_GCM_Fix_Android_APK
-          path: RiftLink_GameMode_Android.apk
+          path: RiftLink_AutoPair_GCM_Fix_Android.apk
           retention-days: 7
       - name: Record successful build run for artifact retrieval
         if: success()
