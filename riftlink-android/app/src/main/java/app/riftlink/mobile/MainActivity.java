@@ -406,7 +406,7 @@ public class MainActivity extends Activity {
                     // Audio/file transfer start once per authorized PC. A
                     // video-only recovery must never restart or multiply them.
                     startVideo();
-                    candidate.startFileAutoSync(this::showTransferMessage);
+                    candidate.startFileAutoSync(MainActivity.this::showTransferMessage);
                     if(audioEnabled)candidate.startAudio(
                         msg->runOnUiThread(()->{
                             if(net==candidate)status.setText(msg);
