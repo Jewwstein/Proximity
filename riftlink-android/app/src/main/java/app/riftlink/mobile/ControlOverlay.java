@@ -34,6 +34,8 @@ public final class ControlOverlay extends View {
     float lookSensitivity=1f;
     long lastLookTap=0;
     float lastPinchDistance=0,lastPinchCenterX=0,lastPinchCenterY=0;
+    float pinchStartDistance=0;
+    boolean pinchZooming=false;
     int opacity=135;
     float cursorX=.5f,cursorY=.5f,videoBoxW,videoBoxH,cursorOffsetX=0,cursorOffsetY=0;
     int mousePointer=-1,editingPointer=-1;
@@ -309,7 +311,7 @@ public final class ControlOverlay extends View {
         send.send("padReset","",cursorX,cursorY);
         send.send("releaseAllKeys","",cursorX,cursorY);
         if(holdTask!=null)ui.removeCallbacks(holdTask);
-        mousePointer=-1;editingPointer=-1;pinching=false;
+        mousePointer=-1;editingPointer=-1;pinching=false;pinchZooming=false;
     }
     @Override protected void onDraw(Canvas c){
         super.onDraw(c);
@@ -419,6 +421,7 @@ public final class ControlOverlay extends View {
                 lastPinchDistance=(float)Math.hypot(e.getX(1)-e.getX(0),e.getY(1)-e.getY(0));
                 lastPinchCenterX=(e.getX(1)+e.getX(0))*.5f;
                 lastPinchCenterY=(e.getY(1)+e.getY(0))*.5f;
+                pinchStartDistance=lastPinchDistance;pinchZooming=false;
                 if(holdTask!=null)ui.removeCallbacks(holdTask);
                 if(mouseHeld){send.send("up","",cursorX,cursorY);mouseHeld=false;}
                 mousePointer=-1;return true;
@@ -451,10 +454,17 @@ public final class ControlOverlay extends View {
                 float cx=(e.getX(0)+e.getX(1))*.5f;
                 float cy=(e.getY(0)+e.getY(1))*.5f;
                 MainActivity activity=(MainActivity)getContext();
-                float change=distance-lastPinchDistance;
-                if(lastPinchDistance>10&&Math.abs(change)>4)activity.onPinch(distance/lastPinchDistance);
-                else if(activity.zoom<=1.01f)activity.twoFingerScroll(cy-lastPinchCenterY);
-                else activity.panZoom(cx-lastPinchCenterX,cy-lastPinchCenterY);
+                // Determine gesture using the *full* distance change from
+                // pointer-down, not just per-frame jitter. A slow pinch now
+                // works, while parallel swipes reliably scroll or pan.
+                if(!pinchZooming && Math.abs(distance-pinchStartDistance)>14f)
+                    pinchZooming=true;
+                if(pinchZooming && lastPinchDistance>10)
+                    activity.onPinch(distance/lastPinchDistance);
+                else if(activity.zoom<=1.01f)
+                    activity.twoFingerScroll(cy-lastPinchCenterY);
+                else
+                    activity.panZoom(cx-lastPinchCenterX,cy-lastPinchCenterY);
                 lastPinchDistance=distance;lastPinchCenterX=cx;lastPinchCenterY=cy;
                 return true;
             }
@@ -481,7 +491,10 @@ public final class ControlOverlay extends View {
           case MotionEvent.ACTION_UP:
           case MotionEvent.ACTION_POINTER_UP:
           case MotionEvent.ACTION_CANCEL:{
-            if(pinching){if(e.getPointerCount()<=2){pinching=false;mousePointer=-1;lastPinchDistance=0;}
+            if(pinching){if(e.getPointerCount()<=2){
+                    pinching=false;pinchZooming=false;mousePointer=-1;
+                    lastPinchDistance=0;pinchStartDistance=0;
+                }
                 return true;}
             if(id==editingPointer){
                 editingPointer=-1;save();invalidate();
