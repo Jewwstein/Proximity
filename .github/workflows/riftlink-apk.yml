@@ -1,0 +1,42 @@
+name: Build RiftLink Android Game Mode
+on:
+  push:
+    branches: [riftlink-android-gamemode-build]
+  workflow_dispatch:
+jobs:
+  android-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android 35 SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Extract RiftLink Android project
+        run: |
+          mkdir -p AndroidApp
+          base64 --decode riftlink_build_source.b64 | tar -xz -C AndroidApp
+          test -f AndroidApp/app/src/main/AndroidManifest.xml
+      - name: Build and validate debug APK
+        run: |
+          gradle --no-daemon -p AndroidApp assembleDebug
+          test -s AndroidApp/app/build/outputs/apk/debug/app-debug.apk
+          unzip -t AndroidApp/app/build/outputs/apk/debug/app-debug.apk
+          cp AndroidApp/app/build/outputs/apk/debug/app-debug.apk RiftLink_GameMode_Android.apk
+          sha256sum RiftLink_GameMode_Android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RiftLink_GameMode_Android_APK
+          path: RiftLink_GameMode_Android.apk
+          retention-days: 7
