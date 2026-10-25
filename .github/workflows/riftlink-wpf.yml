@@ -1,0 +1,43 @@
+name: Validate RiftLink WPF Studio
+on:
+  push:
+    branches: [riftlink-android-gamemode-build]
+  workflow_dispatch:
+jobs:
+  compile-and-preflight:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract Studio sources
+        shell: pwsh
+        run: |
+          $bytes=[Convert]::FromBase64String((Get-Content -Raw 'riftlink_wpf_test_source.b64').Trim())
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\studio-src.tar.gz",$bytes)
+          New-Item -ItemType Directory -Force -Path 'wpf-ci' | Out-Null
+          tar -xzf "$env:RUNNER_TEMP\studio-src.tar.gz" -C wpf-ci
+      - name: Compile WPF with actual Framework compiler
+        shell: pwsh
+        run: |
+          $root=Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319"
+          $csc=Join-Path $root "csc.exe"
+          if(!(Test-Path $csc)){throw "Windows Framework compiler missing"}
+          $libs=@("System.dll","System.Core.dll","System.Drawing.dll","System.Management.dll","System.Xaml.dll","System.Xml.dll","System.Security.dll","System.Runtime.Serialization.dll","WindowsBase.dll","PresentationCore.dll","PresentationFramework.dll")
+          $args=@("/nologo","/target:winexe","/platform:anycpu","/out:$(Join-Path (Get-Location) 'wpf-ci\RiftLinkStudio.exe')")
+          foreach($lib in $libs){
+            $path=Join-Path $root $lib
+            if(!(Test-Path $path)){$path=Join-Path (Join-Path $root "WPF") $lib}
+            if(!(Test-Path $path)){throw "Missing $lib"}
+            $args+=("/reference:" + $path)
+          }
+          $args+=(Join-Path (Get-Location) 'wpf-ci\Program.cs')
+          & $csc @args
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          if(!(Test-Path 'wpf-ci\RiftLinkStudio.exe')){throw "WPF exe not created"}
+      - name: Validate WPF XAML and controls
+        shell: pwsh
+        run: |
+          Push-Location wpf-ci
+          & .\RiftLinkStudio.exe --preflight
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Pop-Location
