@@ -1,38 +1,32 @@
-name: Build Proximity APK
+name: Build RiftLink AutoPair APK
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "riftlink-android-gamemode-build" ]
   workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_HOME: /home/runner/android-sdk
-      ANDROID_SDK_ROOT: /home/runner/android-sdk
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Android command-line tools
-        run: |
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O /tmp/cmdline-tools.zip
-          unzip -q /tmp/cmdline-tools.zip -d /tmp/android-tools
-          mv /tmp/android-tools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
-      - name: Install Android SDK 35
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Restore RiftLink project
+        run: |
+          base64 -d riftlink_build_source.b64 | tar xzf - -C .
+          test -f app/src/main/java/app/riftlink/mobile/PcDiscovery.java
+          test -f app/src/main/java/app/riftlink/mobile/DesktopGestures.java
+      - name: Compile APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
+        if: success()
         with:
-          name: Proximity-v0.1-debug
+          name: RiftLink-AutoPair-Android-Debug
           path: app/build/outputs/apk/debug/app-debug.apk
