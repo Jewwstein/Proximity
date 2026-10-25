@@ -372,6 +372,7 @@ public final class ControlOverlay extends View {
         cursorX=Math.max(0,Math.min(1,cursorX+dx/vw));
         cursorY=Math.max(0,Math.min(1,cursorY+dy/vh));
         send.send("move","",cursorX,cursorY);
+        if(!game)((MainActivity)getContext()).followCursor(cursorX,cursorY);
         invalidate();
     }
     void mouseClick(){
@@ -431,8 +432,10 @@ public final class ControlOverlay extends View {
                 float cx=(e.getX(0)+e.getX(1))*.5f;
                 float cy=(e.getY(0)+e.getY(1))*.5f;
                 MainActivity activity=(MainActivity)getContext();
-                if(lastPinchDistance>10)activity.onPinch(distance/lastPinchDistance);
-                activity.panZoom(cx-lastPinchCenterX,cy-lastPinchCenterY);
+                float change=distance-lastPinchDistance;
+                if(lastPinchDistance>10&&Math.abs(change)>4)activity.onPinch(distance/lastPinchDistance);
+                else if(activity.zoom<=1.01f)activity.twoFingerScroll(cy-lastPinchCenterY);
+                else activity.panZoom(cx-lastPinchCenterX,cy-lastPinchCenterY);
                 lastPinchDistance=distance;lastPinchCenterX=cx;lastPinchCenterY=cy;
                 return true;
             }
