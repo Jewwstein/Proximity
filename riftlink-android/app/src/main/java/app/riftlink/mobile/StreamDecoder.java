@@ -16,6 +16,7 @@ final class StreamDecoder {
     private MediaCodec decoder;
     private long frames=0,lastReport=0,lastTimestamp=-1;
     private volatile boolean closed=false;
+    volatile long lastPresentedAtMs=0;
     StreamDecoder(Surface s,int w,int h,Consumer<String> cb){surface=s;width=w;height=h;status=cb;}
     static final class NAL {int type;byte[] bytes;NAL(int t,byte[] d){type=t;bytes=d;}}
     static List<NAL> nals(byte[] data){
@@ -86,7 +87,7 @@ final class StreamDecoder {
             // Drain all available frames; the latest surface output is what matters for responsiveness.
             for(int k=0;k<8;k++){
                 int out=decoder.dequeueOutputBuffer(info,0);
-                if(out>=0){decoder.releaseOutputBuffer(out,info.size>0);frames++;}
+                if(out>=0){boolean display=info.size>0;decoder.releaseOutputBuffer(out,display);if(display){lastPresentedAtMs=SystemClock.elapsedRealtime();frames++;}}
                 else if(out==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED)continue;
                 else break;
             }
