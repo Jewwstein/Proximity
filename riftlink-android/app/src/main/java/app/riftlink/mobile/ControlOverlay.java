@@ -36,6 +36,11 @@ public final class ControlOverlay extends View {
     float lastPinchDistance=0,lastPinchCenterX=0,lastPinchCenterY=0;
     float pinchStartDistance=0;
     boolean pinchZooming=false;
+    // A two-finger gesture locks to SCROLL, PAN or PINCH until lifted.
+    // Without a mode lock small finger drift turned normal scrolling into zoom.
+    static final int GESTURE_PENDING=0, GESTURE_SCROLL=1, GESTURE_PAN=2, GESTURE_PINCH=3;
+    int twoFingerGesture=GESTURE_PENDING;
+    float initialFingerX0,initialFingerX1,initialFingerY0,initialFingerY1;
     int opacity=135;
     float cursorX=.5f,cursorY=.5f,videoBoxW,videoBoxH,cursorOffsetX=0,cursorOffsetY=0;
     int mousePointer=-1,editingPointer=-1;
@@ -312,6 +317,7 @@ public final class ControlOverlay extends View {
         send.send("releaseAllKeys","",cursorX,cursorY);
         if(holdTask!=null)ui.removeCallbacks(holdTask);
         mousePointer=-1;editingPointer=-1;pinching=false;pinchZooming=false;
+        twoFingerGesture=GESTURE_PENDING;
     }
     @Override protected void onDraw(Canvas c){
         super.onDraw(c);
@@ -416,12 +422,20 @@ public final class ControlOverlay extends View {
           case MotionEvent.ACTION_DOWN:
           case MotionEvent.ACTION_POINTER_DOWN: {
             if(e.getPointerCount()==2 && action==MotionEvent.ACTION_POINTER_DOWN
-                 && !edit && fingers.isEmpty() && hit(x,y)==null){
+                 && !game && !edit){
+                // Always prioritize two-finger desktop gestures over a pending
+                // single-finger click. The original hit/fingers guard could
+                // silently reject gestures after an earlier pointer interaction.
+                fingers.clear();
                 pinching=true;
                 lastPinchDistance=(float)Math.hypot(e.getX(1)-e.getX(0),e.getY(1)-e.getY(0));
                 lastPinchCenterX=(e.getX(1)+e.getX(0))*.5f;
                 lastPinchCenterY=(e.getY(1)+e.getY(0))*.5f;
                 pinchStartDistance=lastPinchDistance;pinchZooming=false;
+                twoFingerGesture=GESTURE_PENDING;
+                initialFingerX0=e.getX(0);initialFingerY0=e.getY(0);
+                initialFingerX1=e.getX(1);initialFingerY1=e.getY(1);
+                ((MainActivity)getContext()).scrollAccumulator=0;
                 if(holdTask!=null)ui.removeCallbacks(holdTask);
                 if(mouseHeld){send.send("up","",cursorX,cursorY);mouseHeld=false;}
                 mousePointer=-1;return true;
@@ -454,17 +468,42 @@ public final class ControlOverlay extends View {
                 float cx=(e.getX(0)+e.getX(1))*.5f;
                 float cy=(e.getY(0)+e.getY(1))*.5f;
                 MainActivity activity=(MainActivity)getContext();
-                // Determine gesture using the *full* distance change from
-                // pointer-down, not just per-frame jitter. A slow pinch now
-                // works, while parallel swipes reliably scroll or pan.
-                if(!pinchZooming && Math.abs(distance-pinchStartDistance)>14f)
-                    pinchZooming=true;
-                if(pinchZooming && lastPinchDistance>10)
-                    activity.onPinch(distance/lastPinchDistance);
-                else if(activity.zoom<=1.01f)
+                // Use BOTH fingertips to identify a parallel swipe. A vertical
+                // scroll cannot accidentally become a pinch once recognized.
+                float y0=e.getY(0)-initialFingerY0;
+                float y1=e.getY(1)-initialFingerY1;
+                float x0=e.getX(0)-initialFingerX0;
+                float x1=e.getX(1)-initialFingerX1;
+                float commonY=(y0+y1)*.5f,commonX=(x0+x1)*.5f;
+                float startSeparation=Math.max(1f,pinchStartDistance);
+                float separationChange=Math.abs(distance-pinchStartDistance);
+                float minimumSwipe=7f*getResources().getDisplayMetrics().density;
+                float pinchThreshold=Math.max(22f*getResources().getDisplayMetrics().density,
+                    startSeparation*.09f);
+                if(twoFingerGesture==GESTURE_PENDING){
+                    boolean parallelVertical=y0*y1>0 &&
+                        Math.abs(y0)>=minimumSwipe && Math.abs(y1)>=minimumSwipe &&
+                        Math.abs(commonY)>=Math.abs(commonX)*.8f;
+                    if(parallelVertical){
+                        twoFingerGesture=activity.zoom<=1.01f?GESTURE_SCROLL:GESTURE_PAN;
+                    }else if(separationChange>=pinchThreshold &&
+                        separationChange>Math.hypot(commonX,commonY)*.75f){
+                        twoFingerGesture=GESTURE_PINCH;
+                        pinchZooming=true;
+                    }else if(activity.zoom>1.01f &&
+                        Math.hypot(commonX,commonY)>=minimumSwipe){
+                        twoFingerGesture=GESTURE_PAN;
+                    }
+                }
+                if(twoFingerGesture==GESTURE_SCROLL){
+                    // Windows expects wheel delta in JSON field "d".
+                    // Scrolling stays enabled even with slight finger drift.
                     activity.twoFingerScroll(cy-lastPinchCenterY);
-                else
+                }else if(twoFingerGesture==GESTURE_PAN){
                     activity.panZoom(cx-lastPinchCenterX,cy-lastPinchCenterY);
+                }else if(twoFingerGesture==GESTURE_PINCH && lastPinchDistance>10f){
+                    activity.onPinch(distance/lastPinchDistance);
+                }
                 lastPinchDistance=distance;lastPinchCenterX=cx;lastPinchCenterY=cy;
                 return true;
             }
@@ -493,6 +532,7 @@ public final class ControlOverlay extends View {
           case MotionEvent.ACTION_CANCEL:{
             if(pinching){if(e.getPointerCount()<=2){
                     pinching=false;pinchZooming=false;mousePointer=-1;
+                    twoFingerGesture=GESTURE_PENDING;
                     lastPinchDistance=0;pinchStartDistance=0;
                 }
                 return true;}
