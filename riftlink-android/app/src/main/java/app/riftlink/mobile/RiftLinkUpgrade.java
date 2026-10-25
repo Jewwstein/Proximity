@@ -147,6 +147,11 @@ final class RiftLinkUpgrade {
     n.work.execute(()->{
       try{
         JSONArray games=RiftLinkExtra.games(n);
+        final android.graphics.Bitmap[] icons= new android.graphics.Bitmap[games==null?0:games.length()];
+        for(int g=0;g<Math.min(24,icons.length);g++){
+          JSONObject entry=games.optJSONObject(g);
+          if(entry!=null)icons[g]=RiftLinkExtra.icon(n,entry.optString("id",""));
+        }
         a.runOnUiThread(()->{
           if(n!=a.net)return;
           if(games==null||games.length()==0){
@@ -154,14 +159,36 @@ final class RiftLinkUpgrade {
               .setMessage("Add games in RiftLink Studio > Game library on your PC. The original desktop stream remains available.")
               .setPositiveButton("Desktop Mode",(d,w)->desktop()).show();return;
           }
-          String[] names=new String[games.length()];
-          for(int i=0;i<names.length;i++){
-            JSONObject item=games.optJSONObject(i);
-            names[i]=item==null?"Game":item.optString("title","Game")+
-              (item.optBoolean("available",true)?"":" (unavailable)");
-          }
+          android.widget.BaseAdapter cards=new android.widget.BaseAdapter(){
+            public int getCount(){return games.length();}
+            public Object getItem(int pos){return games.optJSONObject(pos);}
+            public long getItemId(int pos){return pos;}
+            public View getView(int pos,View convert,android.view.ViewGroup parent){
+              JSONObject item=games.optJSONObject(pos);
+              android.widget.LinearLayout row=new android.widget.LinearLayout(a);
+              row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+              row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+              row.setPadding(a.dp(16),a.dp(10),a.dp(16),a.dp(10));
+              row.setBackgroundColor(pos%2==0?0xFF050A10:0xFF0B1420);
+              android.widget.ImageView art=new android.widget.ImageView(a);
+              android.widget.LinearLayout.LayoutParams artSize=
+                new android.widget.LinearLayout.LayoutParams(a.dp(52),a.dp(52));
+              artSize.rightMargin=a.dp(14);
+              art.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+              if(icons[pos]!=null)art.setImageBitmap(icons[pos]);
+              else art.setImageResource(android.R.drawable.ic_media_play);
+              row.addView(art,artSize);
+              android.widget.TextView title=new android.widget.TextView(a);
+              title.setText(item==null?"Game":item.optString("title","Game")+
+                (item.optBoolean("available",true)?"":"   •   Not installed"));
+              title.setTextColor(0xFFE6F4FF);title.setTextSize(17);
+              title.setShadowLayer(a.dp(3),0,a.dp(1),0xFF166BAE);
+              row.addView(title,new android.widget.LinearLayout.LayoutParams(0,-2,1));
+              return row;
+            }
+          };
           new AlertDialog.Builder(a).setTitle("RiftLink / Game Mode")
-            .setItems(names,(d,index)->{
+            .setAdapter(cards,(d,index)->{
               JSONObject item=games.optJSONObject(index);
               if(item!=null)launch(item.optString("id",""),item.optString("title","Game"));
             })
