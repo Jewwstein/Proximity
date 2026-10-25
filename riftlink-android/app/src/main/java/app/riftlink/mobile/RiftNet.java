@@ -396,7 +396,7 @@ public class RiftNet {
         work.execute(()->{
             java.util.HashSet<String> seen=new java.util.HashSet<>();
             boolean primed=false;
-            while(running&&streaming&&autoFileSyncEnabled){
+            while(running&&autoFileSyncEnabled&&!token.isEmpty()){
                 try{
                     HttpsURLConnection c=open("/api/files/list","GET");
                     c.setReadTimeout(10000);
