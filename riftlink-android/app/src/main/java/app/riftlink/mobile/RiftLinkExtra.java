@@ -120,6 +120,21 @@ final class RiftLinkExtra {
     json(net,"/api/games/launch","POST",new JSONObject().put("id",id));
   }
 
+  static android.graphics.Bitmap icon(RiftNet net,String id) {
+    if(!id.matches("[a-zA-Z0-9_-]{1,64}"))return null;
+    HttpsURLConnection c=null;
+    try {
+      c=net.open("/api/games/icon?id="+id,"GET");
+      if(c.getResponseCode()!=200||c.getContentLengthLong()>4*1024*1024)return null;
+      if(c.getContentType()==null||!c.getContentType().toLowerCase(Locale.US).contains("image/png"))return null;
+      try(InputStream stream=c.getInputStream()){
+        android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
+        opts.inSampleSize=2;
+        return android.graphics.BitmapFactory.decodeStream(stream,null,opts);
+      }
+    }catch(Exception ignored){return null;}finally{if(c!=null)c.disconnect();}
+  }
+
   static void sendPhoneStats(RiftNet net,Context context,boolean game) throws Exception {
     ActivityManager am=(ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
     ActivityManager.MemoryInfo memory=new ActivityManager.MemoryInfo();am.getMemoryInfo(memory);
