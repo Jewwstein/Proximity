@@ -46,9 +46,21 @@ final class RiftLinkUpgrade {
   }
 
   void connect(RiftLinkExtra.PC pc){
+    // Choosing Game/Desktop on the CURRENT PC must never disconnect the
+    // working H.264 decoder or replace a valid input WebSocket.
+    RiftNet current=a.net;
+    if(current!=null&&current.running&&!current.token.isEmpty()&&
+       current.host.equals(pc.ip)){
+        a.connectionPanel.setVisibility(View.GONE);
+        a.ensureVideoAlive();
+        if(gameMode)showGameLibrary();else desktop();
+        return;
+    }
+    // A genuinely DIFFERENT PC needs a clean, ordered video teardown.
+    // Previously only RiftNet stopped; its old decoder kept the Surface.
+    a.stopVideo();
     a.hostBox.setText(pc.ip);
     a.getPreferences(0).edit().putString("host",pc.ip).apply();
-    if(a.net!=null)a.net.stop();
     a.net=new RiftNet(a,pc.ip);
     final RiftNet n=a.net;
     a.status.setText("Verifying PC certificate…");
@@ -138,6 +150,7 @@ final class RiftLinkUpgrade {
     a.controls.invalidate();
     a.toast("Desktop Mode — original V2.2 mouse and keyboard");
     if(a.menuScroller!=null)a.menuScroller.setVisibility(View.GONE);
+    a.ensureVideoAlive();
   }
 
   void showGameLibrary(){
@@ -214,6 +227,7 @@ final class RiftLinkUpgrade {
           // Deliberately retain user-adjusted FPS layout and existing control mappings.
           a.controls.invalidate();
           a.status.setText("RiftLink Game Mode • "+title);
+          a.ensureVideoAlive();
           a.toast("Launching "+title+" on your PC");
         });
       }catch(Exception ex){a.runOnUiThread(()->a.toast("Game launch: "+ex.getMessage()));}
