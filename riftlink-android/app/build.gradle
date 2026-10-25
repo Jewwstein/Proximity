@@ -3,11 +3,11 @@ android {
     namespace 'app.riftlink.mobile'
     compileSdk 35
     defaultConfig {
-        applicationId 'app.riftlink.mobile.integrated.v25'
+        applicationId 'app.riftlink.mobile.integrated.v26'
         minSdk 29
         targetSdk 35
-        versionCode 15
-        versionName '2.5.0-scroll-cellular-test'
+        versionCode 16
+        versionName '2.6.0-video-continuity'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     buildTypes { release { minifyEnabled false } }
