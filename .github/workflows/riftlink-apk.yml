@@ -55,7 +55,7 @@ jobs:
           test -s AndroidApp/app/build/outputs/apk/debug/app-debug.apk
           unzip -t AndroidApp/app/build/outputs/apk/debug/app-debug.apk
           cp AndroidApp/app/build/outputs/apk/debug/app-debug.apk RiftLink_AutoPair_GCM_Fix_Android.apk
-          sha256sum RiftLink_GameMode_Android.apk
+          sha256sum RiftLink_AutoPair_GCM_Fix_Android.apk
       - uses: actions/upload-artifact@v4
         with:
           name: RiftLink_AutoPair_GCM_Fix_Android_APK
